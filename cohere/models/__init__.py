@@ -13,9 +13,6 @@ class CBOWModel(object):
         self.max_iters_ = max_iters
         self.batch_size_ = batch_size
 
-#        X_train = X_train[indices, :]
-#        y_train = y_train[indices]
-
         self.init_nnet()
 
     def init_nnet(self):
@@ -111,4 +108,30 @@ class CBOWModel(object):
 
 
 
+class RNNModel(object):
+    def __init__(self, embedding, hidden_dim=100, sentence_dim=50,
+                 window_size=3, learning_rate=.1, max_iters=75, 
+                 batch_size=25):
+        self.hidden_dim_ = hidden_dim
+        self.window_size_ = window_size
+        self.sentence_dim_ = sentence_dim
+        self.window_dim_ = window_size * sentence_dim
+        self.learning_rate_ = learning_rate
+        self.max_iters_ = max_iters
+        self.batch_size_ = batch_size
+        self._embedding = theano.shared(
+            value=embedding.embed_.astype(theano.config.floatX),
+            name='embeddings',
+            borrow=True)
+
+        self.init_nnet()
+
+    def init_nnet(self):
+        idxs = T.imatrix()
+        self.x_ = self._embedding[idxs].reshape(
+            (idxs.shape[0], self.sentence_dim_))
+        self.idxs_ = idxs
+
+    def fit(self, X_train, y_train):
+        print theano.function([self.idxs_], self.x_)(np.array(X_train[0][1]).astype(np.int32)[:, np.newaxis])
 

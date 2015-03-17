@@ -44,6 +44,26 @@ def negative_window_gen(doc):
                    doc.sents[rand_index].format_tokens(fmt=fmt),
                    doc.sents[i + 1].format_tokens(fmt=fmt)]
 
+def docs2train_seq(docs, embedding):
+    y_docs = []
+    X_docs = []
+    for doc in docs:
+        if len(doc) <= 3:
+            continue
+        pos_seq = embedding.doc2seq(doc, positive=True) 
+        neg_seq = embedding.doc2seq(doc, positive=False)
+        y_docs.extend([1] * len(pos_seq)) 
+        y_docs.extend([0] * len(neg_seq))
+        X_docs.extend(pos_seq)
+        X_docs.extend(neg_seq)
+    y_docs = np.array(y_docs)
+    rnd = range(y_docs.shape[0])
+    random.shuffle(rnd)
+    X_docs = [X_docs[i] for i in rnd]
+    y_docs = y_docs[rnd]
+    return X_docs, y_docs.astype(np.int32).ravel()
+    
+
 def docs2trainvecs(docs, embedding):
     y_docs = []
     X_docs = []

@@ -40,6 +40,16 @@ class StaticGloVeEmbeddings(object):
         vec = np.hstack(vec)
         return vec
 
+    def window2seq(self, window):
+        vec = []
+        for sent in window:
+            index_vec = [] 
+            for word in sent.split(" "):
+                if word in self.vocab_:
+                    index_vec.append(self.vocab_[word])
+            vec.append(index_vec)
+        return vec
+
     def doc2mat(self, doc, positive=True):
         if positive is True:
             win_gen = positive_window_gen
@@ -49,3 +59,11 @@ class StaticGloVeEmbeddings(object):
         mat = np.array([self.window2vec(w) for w in windows])
         return mat
 
+    def doc2seq(self, doc, positive=True):
+        if positive is True:
+            win_gen = positive_window_gen
+        else: 
+            win_gen = negative_window_gen
+        windows = [w for w in win_gen(doc)]
+        seqs = [self.window2seq(w) for w in windows]
+        return seqs
