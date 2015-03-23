@@ -147,19 +147,27 @@ def preprocess_barzilay_ntsb(path_to_ntsb_tgz, path_to_ntsb_clean_tgz,
 
 
 
-def get_barzilay_ntsb_clean_docs_only(part="train"):
+def get_barzilay_ntsb_clean_docs_only(part="train", tokens_only=False):
     data_dir = os.getenv("COHERENCE_DATA", "data")
     path = os.path.join(
         data_dir, "barzilay_ntsb_clean_doc_{}.pkl.gz".format(part))
     with gzip.open(path, u"r") as f:
-        return pickle.load(f)
+        docs = pickle.load(f)
+    if tokens_only:
+        token_only_docs = [[[unicode(t).lower() for t in sent]
+                            for sent in doc]
+                           for doc in docs] 
+        return token_only_docs
+    else:
+        return docs
 
 def get_barzilay_ntsb_clean_docs_perms(part="train"):
     data_dir = os.getenv("COHERENCE_DATA", "data")
     path = os.path.join(
         data_dir, "barzilay_ntsb_clean_doc_perm_{}.pkl.gz".format(part))
     with gzip.open(path, u"r") as f:
-        return pickle.load(f)
+        docs = pickle.load(f)
+    return docs
 
 
 
