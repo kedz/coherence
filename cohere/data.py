@@ -161,14 +161,22 @@ def get_barzilay_ntsb_clean_docs_only(part="train", tokens_only=False):
     else:
         return docs
 
-def get_barzilay_ntsb_clean_docs_perms(part="train"):
+def get_barzilay_ntsb_clean_docs_perms(part="train", tokens_only=False):
     data_dir = os.getenv("COHERENCE_DATA", "data")
     path = os.path.join(
         data_dir, "barzilay_ntsb_clean_doc_perm_{}.pkl.gz".format(part))
     with gzip.open(path, u"r") as f:
-        docs = pickle.load(f)
-    return docs
-
+        docs_perms = pickle.load(f)
+    if tokens_only is True:
+        for doc_perm in docs_perms:
+            doc = doc_perm["gold"]
+            doc_perm["gold"] = [[unicode(t).lower() for t in sent]
+                                for sent in doc_perm["gold"]]
+            doc_perm["perms"] = [[[unicode(t).lower() for t in sent]
+                                 for sent in perm]
+                                 for perm in doc_perm["perms"]]
+            
+    return docs_perms
 
 
 if __name__ == "__main__":
