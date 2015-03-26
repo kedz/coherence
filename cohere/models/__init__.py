@@ -1,6 +1,7 @@
 import theano
 import theano.tensor as T
 import numpy as np
+from itertools import izip
 
 class CBOWModel(object):
     def __init__(self, hidden_dim=100, sentence_dim=50, window_size=3,
@@ -272,7 +273,7 @@ class RNNModel(object):
 
 class RNNModel(object):
     def __init__(self, embedding, max_sent_len, hidden_dim=100, window_size=3, 
-                 learning_rate=.01, max_iters=50, batch_size=25, lam=.1,
+                 learning_rate=.01, max_iters=50, batch_size=25, lam=.01,
                  fit_init=False, fit_embeddings=False):
                  
         self.max_sent_len = max_sent_len
@@ -494,16 +495,18 @@ class RNNModel(object):
         
         self._nn_output = T.nnet.softmax(
             T.dot(h1, self.params["W2"]) + self.params["b2"])
+        self._nn_output_func = theano.function([II, M], self._nn_output)
+
         self._nll = -T.mean(
             T.log(self._nn_output)[T.arange(y_gold.shape[0]), y_gold])      
         reg = (self.params["W_rec"]**2).sum() + \
-              (self.params["V_rec"]**2).sum() + \
               (self.params["W1_s1"]**2).sum() + \
               (self.params["W1_s2"]**2).sum() + \
               (self.params["W1_s0"]**2).sum() + \
               (self.params["W2"]**2).sum()
+              #(self.params["V_rec"]**2).sum() + \
         self._reg = reg
-        self._cost = self._nll #+ self.lam * reg
+        #self._cost = self._nll #+ self.lam * reg
         
     def step_mask(self, x1_t, x2_t, x3_t, 
                   mask1, mask2, mask3,
@@ -524,10 +527,22 @@ class RNNModel(object):
         h3_t = T.tanh(T.dot(h3_tm1, V_rec) + T.dot(x3_t, W_rec) + b_rec)
         return h1_t, h2_t, h3_t  
     
-    def fit(self, X_train, y_train):
+    def predict_prob_windows(self, IX):
+        mask = np.ones_like(IX)
+        mask[IX == self.pad] = 0
+        return self._nn_output_func(IX, mask)
+
+
+    def fit(self, X_train, y_train, X_dev=None, y_dev=None, 
+            X_gold=None, X_perm=None):
         mask = np.ones_like(X_train)
         mask[X_train == self.pad] = 0
         
+        if X_dev is not None:
+            mask_dev = np.ones_like(X_dev)
+            mask_dev[X_dev == self.pad] = 0
+
+
         X_shared = theano.shared(X_train.astype(np.int32),
             name="X_shared",
             borrow=True)
@@ -542,15 +557,26 @@ class RNNModel(object):
         II = self.sym_vars["input"]
         M = self.sym_vars["mask"]
         
+        adagrad = theano.shared(
+            np.zeros(self.theta.get_value(borrow=True).shape[0],
+                dtype=theano.config.floatX),
+            name="adagrad",
+            borrow=True)
+
         n_batches = X_shared.get_value(borrow=True).shape[0] / self.batch_size
-        gtheta = T.grad(self._cost, self.theta)
+        cost = self._nll + self.lam * self._reg / (2. * II.shape[0])
+        gtheta = T.grad(cost, self.theta)
+
+        # diagonal adagrad update
+        adagrad += gtheta**2
+        delta = self.learning_rate * (gtheta / T.sqrt(adagrad))
         updates = [(self.theta, self.theta - self.learning_rate * gtheta)]
         
         
         index = T.scalar(dtype='int32')  # index to a [mini]batch
         train_model = theano.function(
             inputs=[index],
-            outputs=[self._cost],
+            outputs=[cost, gtheta, adagrad],
             updates=updates,
             givens={
                 II: X_shared[
@@ -569,10 +595,19 @@ class RNNModel(object):
         for n_iter in xrange(self.max_iters):
             print "iter", n_iter
             for i in xrange(n_batches):
-
                 train_model(i)
-
             print avg_err(X_train, y_train, mask)
-
-
-
+            if X_dev is not None and y_dev is not None:
+                print "avg err", avg_err(X_dev, y_dev, mask_dev)
+            if X_gold is not None and X_perm is not None:
+                rank_err = 0
+                total = 0
+                for x_gold, x_perm in izip(X_gold, X_perm):
+                    lp_gold = np.log(
+                        self.predict_prob_windows(x_gold)[:,1]).sum()
+                    lp_perm = np.log(
+                        self.predict_prob_windows(x_perm)[:,1]).sum()
+                    if lp_gold > lp_perm:
+                        rank_err += 1
+                    total += 1
+                print "DEV DOC ERR", float(rank_err) / total
