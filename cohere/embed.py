@@ -189,6 +189,7 @@ class StaticGloVeEmbeddings(object):
         seqs = [self.window2seq(w) for w in windows]
         return seqs
 
+
 class IndexDocTransformer(object):
     def __init__(self, embedding, start_pads=1, stop_pads=1, window_size=3,
                  max_sent_len=200):
@@ -205,6 +206,30 @@ class IndexDocTransformer(object):
                 if len(sent) > max_sent_len:
                     max_sent_len = len(sent)
         assert max_sent_len < self.max_sent_len
+
+    def transform_test(self, docs_perms):
+        IX_gold = []
+        IX_perm = []
+        for doc_perm in docs_perms:
+            gold_doc = doc_perm["gold"]
+            [gold_idoc] = self._docs2index_docs([gold_doc], 
+                                                self.max_sent_len)
+            ix_gold = self._index_docs2windows([gold_idoc], self.window_size, 
+                self.max_sent_len, positive=True)
+            perm_idocs = self._docs2index_docs(doc_perm["perms"], 
+                                               self.max_sent_len)
+            ix_perms = \
+                [self._index_docs2windows(
+                    [perm_idoc], self.window_size, self.max_sent_len, 
+                    positive=True)
+                 for perm_idoc in perm_idocs]
+                                             
+            for i, ix_perm in enumerate(ix_perms):
+                IX_gold.append(ix_gold)
+                IX_perm.append(ix_perm)
+            
+            assert len(IX_gold) == len(IX_perm)
+            return IX_gold, IX_perm
 
     def transform(self, docs):
         index_docs = self._docs2index_docs(docs, self.max_sent_len) 
@@ -340,3 +365,5 @@ class IndexDocTransformer(object):
     def inverse_transform(self, IX):
         return np.array(
             [self.embedding.get_words(ix) for ix in IX], dtype=object)
+
+
