@@ -37,6 +37,36 @@ class WordEmbeddings(object):
                 for index in indices]
 
 
+class SennaEmbeddings(WordEmbeddings):
+    def __init__(self, embedding_path=None):
+
+        # Find embedding path and attempt to load it. Raise an exception
+        # if senna word embedding file is not found.
+        if embedding_path is None:
+            embedding_path = os.path.join(
+                os.getenv("COHERENCE_DATA", "data"), "embeddings", 
+                "senna.130K.50d.txt.gz")
+        if not os.path.exists(embedding_path):
+            raise Exception("{} does not exist!".format(embedding_path))
+
+        # Read in embeddings and map tokens to indices in the embedding 
+        # matrix.
+        embed = []
+        current_index = 0
+        token2index = {}
+        with gzip.open(embedding_path, u"r") as f:
+            for line in f:
+                line = line.strip().split(" ")
+                word = line.pop(0)
+                embed.append([float(x) for x in line])
+                token2index[word] = current_index
+                current_index += 1
+        embed = np.array(embed, dtype=np.float64)
+
+        # Finally call parent constructor.
+        super(SennaEmbeddings, self).__init__(token2index, embed)
+
+
 class GloVeEmbeddings(WordEmbeddings):
     def __init__(self, embedding_path=None):
 
