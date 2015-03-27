@@ -2,283 +2,61 @@ import theano
 import theano.tensor as T
 import numpy as np
 from itertools import izip
+import cPickle as pickle
+import os
+import datetime
+from sklearn.base import BaseEstimator
 
-class CBOWModel(object):
-    def __init__(self, hidden_dim=100, sentence_dim=50, window_size=3,
-                 learning_rate=.1, max_iters=75, batch_size=25):
-        self.hidden_dim_ = hidden_dim
-        self.window_size_ = window_size
-        self.sentence_dim_ = sentence_dim
-        self.window_dim_ = window_size * sentence_dim
-        self.learning_rate_ = learning_rate
-        self.max_iters_ = max_iters
-        self.batch_size_ = batch_size
-
-        self.init_nnet()
-
-    def init_nnet(self):
-
-        # Initialize weight and biases
-        W1_ = theano.shared(
-            value=np.random.uniform(
-                size=(self.window_dim_, self.hidden_dim_)
-                    ).astype(theano.config.floatX),
-            name='W1',
-            borrow=True)
-        W2_ = theano.shared(
-            value=np.random.uniform(
-                size=(self.hidden_dim_, 2)).astype(theano.config.floatX),
-            name='W2',
-            borrow=True)
-
-        b1_ = theano.shared(
-            value=np.zeros((self.hidden_dim_,), dtype=theano.config.floatX),
-            name='b1', borrow=True)
-        b2_ = theano.shared(value=np.zeros((2,), dtype=theano.config.floatX),
-            name='b2', borrow=True)
-
-        ### input and class label theano vars
-        x = T.matrix('x')
-        y = T.ivector('y')
-        self.x_ = x
-        self.y_ = y
-
-        ### nnet architecture ###
-        h1_ = T.tanh(T.dot(x, W1_) + b1_)
-        nnet_out = T.nnet.softmax(T.dot(h1_, W2_) + b2_)
-
-        # define document probability 
-        doc_prob = T.sum(T.log(nnet_out)[:,1])
-        self.doc_prob = theano.function([x], doc_prob)
-
-        pred = T.argmax(nnet_out, axis=1)
-        #self.pred_ = pred
-        self.predict = theano.function([x], pred)        
-        err = T.mean(T.neq(y, pred))
-        self.err = theano.function([x, y], err)
-
-
-        # Define cost, gradients, and update
-
-
-        cost = -T.mean(T.log(nnet_out)[T.arange(y.shape[0]), y])
-        
-        dW1 = T.grad(cost, W1_)
-        db1 = T.grad(cost, b1_)
-        dW2 = T.grad(cost, W2_)
-        db2 = T.grad(cost, b2_)
-        updates = [(W1_, W1_ - self.learning_rate_ * dW1),
-                   (b1_, b1_ - self.learning_rate_ * db1),
-                   (W2_, W2_ - self.learning_rate_ * dW2),
-                   (b2_, b2_ - self.learning_rate_ * db2),]
-        self.cost_ = cost
-        self.updates_ = updates
-
-    def fit(self, X_train, y_train):
-
-        shared_X = theano.shared(
-            np.asarray(X_train, dtype=theano.config.floatX), borrow=True)
-        shared_y = theano.shared(
-            np.asarray(y_train, dtype='int32'), borrow=True)
-
-        n_batches = shared_X.get_value(borrow=True).shape[0] / self.batch_size_
-
-
-        index = T.scalar(dtype='int32')  # index to a [mini]batch
-        train_model = theano.function(
-            inputs=[index],
-            outputs=self.cost_,
-            updates=self.updates_,
-            givens={
-                self.x_: shared_X[
-                    index * self.batch_size_ : (index+1) * self.batch_size_],
-                self.y_: shared_y[
-                    index * self.batch_size_ : (index+1) * self.batch_size_]
-            }
-        )
-
-        for n_iter in xrange(self.max_iters_):
-            #print "iter", n_iter
-            for i in xrange(n_batches):
-                train_model(i)
-
-            #err = self.err(
-            #    shared_X.get_value(borrow=True),
-            #    shared_y.get_value(borrow=True))
-            #print "avg training err {:0.4f}".format(float(err))
-
-
-
-class RNNModel(object):
-    def __init__(self, embedding, hidden_dim=100, sentence_dim=50,
-                 window_size=3, learning_rate=.1, max_iters=75, 
-                 batch_size=25):
-        self.hidden_dim_ = hidden_dim
-        self.window_size_ = window_size
-        self.sentence_dim_ = sentence_dim
-        self.window_dim_ = window_size * sentence_dim
-        self.learning_rate_ = learning_rate
-        self.max_iters_ = max_iters
-        self.batch_size_ = batch_size
-        self._embedding = theano.shared(
-            value=embedding.embed_.astype(theano.config.floatX),
-            name='embeddings',
-            borrow=True)
-
-        self.init_nnet()
-
-    def init_nnet(self):
-        idxs1 = T.imatrix()
-        idxs2 = T.imatrix()
-        idxs3 = T.imatrix()
-        self.x1_ = self._embedding[idxs1].reshape(
-            (idxs1.shape[0], self.sentence_dim_))
-        self.x2_ = self._embedding[idxs2].reshape(
-            (idxs2.shape[0], self.sentence_dim_))
-        self.x3_ = self._embedding[idxs3].reshape(
-            (idxs3.shape[0], self.sentence_dim_))
-        self.idxs1_ = idxs1
-        self.idxs2_ = idxs2
-        self.idxs3_ = idxs3
-        
-        comp_dims = (self.sentence_dim_, self.sentence_dim_)
-        Wc_h_ = theano.shared(
-            value=np.random.uniform(size=comp_dims).astype(
-                theano.config.floatX),
-            name='Wc_h',
-            borrow=True)
-        Wc_x_ = theano.shared(
-            value=np.random.uniform(size=comp_dims).astype(
-                theano.config.floatX),
-            name='Wc_x',
-            borrow=True)
-
-        h0_1_ = theano.shared(
-            value=np.zeros(self.sentence_dim_, dtype=theano.config.floatX),
-            name='h0_1',
-            borrow=True)
-
-        h0_2_ = theano.shared(
-            value=np.zeros(self.sentence_dim_, dtype=theano.config.floatX),
-            name='h0_2',
-            borrow=True)
-
-        h0_3_ = theano.shared(
-            value=np.zeros(self.sentence_dim_, dtype=theano.config.floatX),
-            name='h0_3',
-            borrow=True)
-
-        bc_ = theano.shared(
-            value=np.zeros(self.sentence_dim_, dtype=theano.config.floatX),
-            name="bc",
-            borrow=True)
-
-        b1_ = theano.shared(
-            value=np.zeros(self.hidden_dim_, dtype=theano.config.floatX),
-            name="b1",
-            borrow=True)
-
-
-        
-        def recurrence(x_t, h_tm1):
-            
-            h_t = T.tanh(T.dot(x_t, Wc_x_) + T.dot(h_tm1, Wc_h_) + bc_)
-            #h_t = T.dot(x_t, Wc_x_) + T.dot(h_tm1, Wc_h_) + bc_
-            return [h_t]
-
-        s1_, _ = theano.scan(fn=recurrence,
-                             sequences=self.x1_,
-                             outputs_info=h0_1_,
-                             n_steps=self.x1_.shape[0])
-        s2_, _ = theano.scan(fn=recurrence,
-                             sequences=self.x2_,
-                             outputs_info=h0_2_,
-                             n_steps=self.x2_.shape[0])
-        s3_, _ = theano.scan(fn=recurrence,
-                             sequences=self.x3_,
-                             outputs_info=h0_3_,
-                             n_steps=self.x3_.shape[0])
-
-        s1_ = s1_[-1]
-        s2_ = s2_[-1]
-        s3_ = s3_[-1]
-
-        layer1_dims = (self.sentence_dim_, self.hidden_dim_) 
-        W1_1_ = theano.shared(
-            value=np.random.uniform(size=layer1_dims).astype(
-                theano.config.floatX),
-            name="W1_1",
-            borrow=True)
-        W1_2_ = theano.shared(
-            value=np.random.uniform(size=layer1_dims).astype(
-                theano.config.floatX),
-            name="W1_2",
-            borrow=True)
-        W1_3_ = theano.shared(
-            value=np.random.uniform(size=layer1_dims).astype(
-                theano.config.floatX),
-            name="W1_3",
-            borrow=True)
-        h1_ = T.tanh(T.dot(s1_, W1_1_) + T.dot(s2_, W1_2_) \
-            + T.dot(s3_, W1_3_) + b1_) 
-
-        ### nnet architecture ###
-        h1_ = T.tanh(T.dot(x, W1_) + b1_)
-        nnet_out = T.nnet.softmax(T.dot(h1_, W2_) + b2_)
-        
-        y = T.ivector('y')
-        self.x_ = x
-        self.y_ = y
-
-
-        ## define document probability 
-        #doc_prob = T.sum(T.log(nnet_out)[:,1])
-        #self.doc_prob = theano.function([x], doc_prob)
-
-        pred = T.argmax(nnet_out, axis=1)
-        #self.pred_ = pred
-        self.predict = theano.function([self.idxs1, self.idxs2], pred)        
-        err = T.mean(T.neq(y, pred))
-        self.err = theano.function([x, y], err)
-
-
-        # Define cost, gradients, and update
-
-
-        cost = -T.mean(T.log(nnet_out)[T.arange(y.shape[0]), y])
-        
-        dW1 = T.grad(cost, W1_)
-        db1 = T.grad(cost, b1_)
-        dW2 = T.grad(cost, W2_)
-        db2 = T.grad(cost, b2_)
-        updates = [(W1_, W1_ - self.learning_rate_ * dW1),
-                   (b1_, b1_ - self.learning_rate_ * db1),
-                   (W2_, W2_ - self.learning_rate_ * dW2),
-                   (b2_, b2_ - self.learning_rate_ * db2),]
-        self.cost_ = cost
-        self.updates_ = updates
-
-
-
-    def fit(self, X_train, y_train):
-        test_vec_tm1 = X_train[0][0].reshape((X_train[0][0].shape[0], 1))
-        test_vec_t = X_train[0][1].reshape((X_train[0][1].shape[0], 1))
-        test_vec_tp1 = X_train[0][2].reshape((X_train[0][2].shape[0], 1))
-        #print theano.function([self.idxs_], self.x_)(test_vec).shape
-        h = theano.function(
-            [self.idxs1_, self.idxs2_, self.idxs3_], 
-            [self.s1_, self.s2_, self.s3_])(
-                test_vec_tm1, test_vec_t, test_vec_tp1)
-        return h
-
-class RNNModel(object):
+class NNModel(BaseEstimator):
     def __init__(self, embedding, max_sent_len, hidden_dim=100, window_size=3, 
-                 learning_rate=.01, max_iters=50, batch_size=25, lam=.01,
-                 fit_init=False, fit_embeddings=False):
-                 
+                 learning_rate=.01, max_iters=50, batch_size=25, lam=1.25,
+                 fit_init=True, fit_embeddings=False, fit_callback=None, 
+                 update_method="adagrad"):
+        """
+        Base class for Neural Network based coherence models.
+        All neural nets implemented in this module follow the same basic
+        feedforward architecture. Subclasses of this class differ only in
+        the way they compute the hiden sentence layers.
+        The feedforward network has a simple 2 layer architecture.
+        Given a window of n sentences this model computes
+                h1 = tanh(W1_s1 * s1 + ... W1_sn * sn + b1)
+                p(y|s1, s2, ..., sn) = sig(W2*h1 + b2)
+        where y is a binary variable (0 = incoherent, 1 = coherent) and the
+        s1 ... sn are the sentence layers.
+        
+        params
+        ------
+        embedding -- cohere.embed.WordEmbedding or subclass,
+        max_sent_len -- int, maximum sentence length of input sentences,
+            sentences shorter than this should be padded with a __PAD__ token.
+            Each row in input matrix should have (window_size * max_sent_len)
+            columns.
+        hidden dim -- int, dimension of hidden layer h1
+        window_size -- int, window size, must be at least 3 and an odd number
+        learning_rate -- float, learning rate for gradient descent or adagrad
+                                (alpha in the latter case)
+        lam -- float, weight of regularization 
+        batch_size, int -- maximum batch size for minibatch sgd
+        max_iters -- int, maximum number of training iterations
+        fit_init -- boolean, default True, only relevant for rnn sentence model
+            where initial hidden recurrent layer is also learned.
+        fit_embed -- bolean, default False, update/learn word embeddings.
+        fit_callback -- callable, a function 
+            callback(nnet, avg_win_err, n_iter) that is called after every
+            training epoch. nnet is the nnet object (aka self), avg_win_err
+            is the current avg training error and n_iter is the current 
+            iteration number, starting at 1. This is a utility method
+            ment to be used for possibly displaying current model accuracy
+            on held out data or saving each iteration of the model.
+        update -- str [sgd|adagrad], update method to use. sgd is the standard
+            gradient descent update. adagrad is the diagonal adagrad update.
+        """                  
+        assert update_method in ["sgd", "adagrad"]
+
         self.max_sent_len = max_sent_len
         self.hidden_dim = hidden_dim
         self.learning_rate = learning_rate
+        self.update_method = update_method
         self.max_iters = max_iters
         self.batch_size = batch_size
         self.lam = lam
@@ -288,19 +66,345 @@ class RNNModel(object):
         self.window_size = window_size
         self.fit_embeddings_ = fit_embeddings
         self.fit_init_ = fit_init
+        self.fit_callback = fit_callback
+
+        self.sym_vars = {u"X_iw": T.imatrix(name=u"X_iw"),
+                         u"y": T.ivector(name=u"y"),
+                         u"M_iw": T.imatrix(name=u"M_iw")} 
+
         
         self.init_params()
-        self.build_network()
+        self.build_network(self.max_sent_len, self.window_size)
+
+    def build_network(self, max_sent_len, win_size):
+        
+        # _funcs will contains compiled theano functions of several
+        # variables for debugging purposes
+        self._funcs = {}
+        
+        # _hidden_layers will contain theano Variables of h_s1, ... , h_sn 
+        # and h1 
+        self._hidden_layers = {}
+        
+        X_iw = self.sym_vars[u"X_iw"]
+        E = self.params[u"E"]    
+        M_iw = self.sym_vars[u"M_iw"]
+        y = self.sym_vars[u"y"]
+                
+        H_s = self._build_sentence_layer(
+            X_iw, M_iw, y, E, max_sent_len, win_size)
+
+        self._funcs["H_s"] = theano.function([X_iw, M_iw], H_s)
+        for i in xrange(win_size):
+            self._hidden_layers["h_s{}".format(i)] = H_s[i]
+
+        # Compute the first hidden layer (this is the concatenation of all
+        # hidden sentence vectors).
+        A1 = self.params["b1"]
+        for i in xrange(win_size):
+            W1_si = self.params["W1_s{}".format(i)]
+            A1 += T.dot(H_s[i], W1_si)
+        h1 = T.tanh(A1)
+        self._hidden_layers["h1"] = h1
+        
+        self._nn_output = T.nnet.softmax(
+            T.dot(h1, self.params["W2"]) + self.params["b2"])
+        self._nn_output_func = theano.function([X_iw, M_iw], self._nn_output)
+
+        self._nll = -T.mean(
+            T.log(self._nn_output)[T.arange(y.shape[0]), y])      
+        
+
+        y_pred = T.argmax(self._nn_output, axis=1)
+        self._funcs["avg win error"] = theano.function(
+            [X_iw, M_iw, y], T.mean(T.neq(y, y_pred)))
+
+        
+    def _mask(self, X_iw):
+        M_iw = np.ones_like(X_iw)
+        M_iw[X_iw == self.pad] = 0
+        return M_iw
+
+    def avg_win_err(self, X_iw, y):
+        M_iw = self._mask(X_iw)
+        return float(self._funcs["avg win error"](X_iw, M_iw, y))
+
+    def predict_prob_windows(self, IX):
+        mask = np.ones_like(IX)
+        mask[IX == self.pad] = 0
+        return self._nn_output_func(IX, mask)
+
+    def log_prob_is_coherent(self, IX):
+        return np.log(self.predict_prob_windows(IX)[:,1]).sum()
+    
+    def score(self, X_gold, X_perm):
+        correct = 0
+        total = len(X_gold)
+        for IX_gold, IX_perm in izip(X_gold, X_perm):
+            gold_lp = self.log_prob_is_coherent(IX_gold)
+            perm_lp = self.log_prob_is_coherent(IX_perm)
+            if gold_lp > perm_lp:
+                correct += 1
+        return correct / float(total)
+
+    def fit(self, X_iw_train, y_train, X_iw_dev=None, y_dev=None):
+
+        n_batches = X_iw_train.shape[0] / self.batch_size
+        M_iw_train = self._mask(X_iw_train)
+
+        X_iw_shared = theano.shared(X_iw_train.astype(np.int32),
+            name="X_iw_shared",
+            borrow=True)
+        M_iw_shared = theano.shared(M_iw_train.astype(np.int32),
+            name="M_iw_shared",
+            borrow=True)
+        y_shared = theano.shared(y_train.astype(np.int32),
+            name="y_shared",
+            borrow=True)
+        
+        if X_iw_dev is not None and y_dev is not None:
+            M_iw_dev = self._mask(X_iw_dev)
+
+            X_iw_dev_shared = theano.shared(X_iw_dev.astype(np.int32),
+                name="X_iw_dev_shared",
+                borrow=True)
+            M_iw_dev_shared = theano.shared(M_iw_dev.astype(np.int32),
+                name="M_iw_dev_shared",
+                borrow=True)
+            y_dev_shared = theano.shared(y_dev.astype(np.int32),
+                name="y_dev_shared",
+                borrow=True)
+ 
+        X_iw = self.sym_vars["X_iw"]
+        M_iw = self.sym_vars["M_iw"]
+        y = self.sym_vars["y"]
+        
+        reg = 0
+        for param in self._reg_params:
+            reg += (param**2).sum() 
+
+        cost = self._nll + self.lam * reg / (2. * X_iw.shape[0])
+        gtheta = T.grad(cost, self.theta)
+
+        if self.update_method == "adagrad":
+            # diagonal adagrad update
+            grad_hist_update = self.grad_hist + gtheta**2
+            grad_hist_upd_safe = T.switch(
+                T.eq(grad_hist_update, 0), 1, grad_hist_update)
+            theta_update = self.theta - \
+                    self.learning_rate / T.sqrt(grad_hist_upd_safe) * gtheta
+            updates = [(self.grad_hist, grad_hist_update),
+                       (self.theta, theta_update)]
+
+        elif self.update_method == "sgd":
+            updates = [(self.theta, self.theta - self.learning_rate * gtheta)]
+        else:
+            raise Exception("'{}' is not an implemented update method".format(
+                self.update_method))
+        
+        index = T.scalar(dtype='int32')  # index to a [mini]batch
+        train_model = theano.function(
+            inputs=[index],
+            outputs=[cost],
+            updates=updates,
+            givens={
+                X_iw: X_iw_shared[
+                    index * self.batch_size : (index + 1) * self.batch_size],
+                y: y_shared[
+                    index * self.batch_size : (index + 1) * self.batch_size],
+                M_iw: M_iw_shared[
+                    index * self.batch_size : (index + 1) * self.batch_size],
+            }
+        )
+        
+
+        for n_iter in xrange(1, self.max_iters + 1):
+            for i in xrange(n_batches):
+                train_model(i)
+            avg_win_err = self.avg_win_err(X_iw_train, y_train)
+            if self.fit_callback is None:
+                print "iter", n_iter, " | avg win err: {:0.3f}".format(
+                    avg_win_err) 
+            else:
+               self.fit_callback(self, avg_win_err, n_iter)            
+
+
+#    def __getstate__(self):
+#        """ Return state sequence."""
+#        params = self._get_params() # parameters set in constructor
+#        theta = self.theta.get_value()
+#        state = (params, theta)
+#        return state
+#
+#    def _set_weights(self, theta):
+#        """ Set fittable parameters from weights sequence."""
+#        self.theta.set_value(theta)
+#
+#    def __setstate__(self, state):
+#        """ Set parameters from state sequence."""
+#        params, theta = state
+#        self.set_params(**params)
+#        self.ready()
+#        self._set_weights(theta)
+#
+#    def save(self, fpath='.', fname=None):
+#        """ Save a pickled representation of Model state. """
+#        fpathstart, fpathext = os.path.splitext(fpath)
+#        if fpathext == '.pkl':
+#            # User supplied an absolute path to a pickle file
+#            fpath, fname = os.path.split(fpath)
+#        elif fname is None:
+#            # Generate filename based on date
+#            date_obj = datetime.datetime.now()
+#            date_str = date_obj.strftime('%Y-%m-%d-%H:%M:%S')
+#            class_name = self.__class__.__name__
+#            fname = '%s.%s.pkl' % (class_name, date_str)
+#        fabspath = os.path.join(fpath, fname)
+#        print("Saving to %s ..." % fabspath)
+#        with open(fabspath, 'wb') as f:
+#            state = self.__getstate__()
+#            pickle.dump(state, file, protocol=pickle.HIGHEST_PROTOCOL)
+#        
+#    def load(self, path):
+#        """ Load model parameters from path. """
+#        print("Loading from %s ..." % path)
+#        with open(path, 'rb') as f:
+#            state = pickle.load(f)
+#            self.__setstate__(state)
+
+
+class CBOWModel(NNModel):
+    def init_params(self):
+        self.params = {}
+        self._reg_params = []
+        
+        # Number of params for W1_s1, W1_s2, ... W1_s(window_size) and b1,
+        # and W2 + b2
+
+        n_feedforward_params = self.hidden_dim * self.word_dim * \
+            self.window_size + self.hidden_dim + 2 * self.hidden_dim + 2
+ 
+        print "n_feedforward_params:", n_feedforward_params
+        
+        n_params = n_feedforward_params
+        
+        print "n_params:", n_params
+        
+        self.theta = theano.shared(
+            value=np.zeros(n_params,
+                dtype=theano.config.floatX),
+            name="theta", borrow=True)
+        
+        current_pointer = 0
+        inits = []
+
+        # Initialize Feed-Forward NN component
+        
+        # Init W1_s...
+        for i in xrange(self.window_size):
+            next_pointer = current_pointer + self.hidden_dim * self.word_dim
+            W1_s = self.theta[current_pointer:next_pointer].reshape(
+                (self.word_dim, self.hidden_dim))
+            W1_s.name="W1_s{}".format(i)
+            self.params[W1_s.name] = W1_s
+            self._reg_params.append(W1_s)            
+
+            W1_s_init = np.random.uniform(
+                low=-.2, high=.2, 
+                size=(self.word_dim, self.hidden_dim)).astype(
+                    theano.config.floatX)
+            inits.append(W1_s_init)
+            current_pointer = next_pointer
+            
+        # Init b1 (hidden_dim)
+        next_pointer = current_pointer + self.hidden_dim    
+        b1 = self.theta[current_pointer:next_pointer].reshape(
+                (self.hidden_dim,))
+        b1.name = "b1"
+        self.params[b1.name] = b1
+            
+        b1_init = np.zeros(self.hidden_dim, dtype=theano.config.floatX)
+        inits.append(b1_init)
+        current_pointer = next_pointer
+    
+        # Init W2 (hidden_dim x 2)
+        next_pointer = current_pointer + self.hidden_dim * 2
+        W2 = self.theta[current_pointer:next_pointer].reshape(
+            (self.hidden_dim, 2))
+        W2.name="W2"
+        self.params[W2.name] = W2
+        self._reg_params.append(W2)            
+        
+        W2_init = np.random.uniform(
+            low=-.2, high=.2, 
+            size=(self.hidden_dim, 2)).astype(
+                theano.config.floatX)
+        inits.append(W2_init)
+        current_pointer = next_pointer
+        
+        # Init b2 (2)
+        next_pointer = current_pointer + 2    
+        b2 = self.theta[current_pointer:next_pointer].reshape(
+                (2,))
+        b2.name = "b2"
+        self.params[b2.name] = b2
+            
+        b2_init = np.zeros(2, dtype=theano.config.floatX)
+        inits.append(b2_init)
+        current_pointer = next_pointer
+    
+        self.theta.set_value(np.concatenate([x.ravel() for x in inits]))
+        
+        E = theano.shared(self._embedding.W.astype(theano.config.floatX),
+            name="E", borrow=True)
+        self.params[E.name] = E
+
+        if self.update_method == "adagrad":
+            self.grad_hist = theano.shared(
+                np.zeros_like(self.theta.get_value(borrow=True)),
+                name="grad_hist",
+                borrow=True)
+
+    def _build_sentence_layer(self, X_iw, M_iw, y, E, max_sent_len, win_size): 
+
+        # Index into word embedding matrix and construct a 
+        # 3d tensor for input. After dimshuffle, dimensions should
+        # be (MAX_LEN * window_size, batch_size, word_dim).
+        X = E[X_iw] 
+        X = X.dimshuffle(1,0,2)
+       
+        self._funcs["X"] = theano.function([X_iw], X)
+        
+        M_T = M_iw.dimshuffle(1,0).reshape((X.shape[0], X.shape[1], 1))
+ 
+        self._funcs["M_T"] = theano.function(
+            [X_iw, M_iw], M_T) 
+
+        X_s_sums = [X[i * max_sent_len:(i + 1) * max_sent_len].sum(axis=0)
+                    for i in xrange(win_size)]
+        M_s_sums = [M_T[i * max_sent_len:(i + 1) * max_sent_len].sum(axis=0)
+                    for i in xrange(win_size)]
+        
+        self._funcs["X_s_sums"] = theano.function([X_iw], X_s_sums)
+        self._funcs["M_s_sums"] = theano.function([X_iw, M_iw], M_s_sums)
+        
+        X_s_avgs = [X_si_sums / M_si_sums
+                     for X_si_sums, M_si_sums in izip(X_s_sums, M_s_sums)]
+
+        return X_s_avgs
+
+
+
+class RNNModel(NNModel):
         
     def init_params(self):    
 
-        self.sym_vars = {
-            "input": T.imatrix(name="input"),
-            "y gold": T.ivector(name="y gold"),
-            "mask": T.imatrix(name="mask")}
-        
-        
+        # params is a dict mapping variable name to theano Variable objects.
         self.params = {}
+        
+        # _reg_params is a list of theano Variables that will be subject
+        # to regularization.
+        self._reg_params = []
         
         # Number of params for W_rec + V_rec + b_rec
         n_recurrent_params = self.word_dim**2 + self.word_dim**2 + \
@@ -323,12 +427,19 @@ class RNNModel(object):
         n_params = n_recurrent_params + n_feedforward_params
         
         print "n_params:", n_params
+        self.n_params = n_params
         
+        # Allocate memory for all params in one block.
         self.theta = theano.shared(
             value=np.zeros(n_params,
                 dtype=theano.config.floatX),
             name="theta", borrow=True)
         
+        # For each parameter we assign it a slice of memory from theta,
+        #     i.e. P = theta[current_pointer:next_pointer]
+        # Initilization values for P are collected in inits
+        # and variable name is mapped in params (i.e. params[P.name] = P).
+        # Optionally P is added to _reg_params if it will be regularized.
         current_pointer = 0
         inits = []
          
@@ -340,6 +451,7 @@ class RNNModel(object):
             (self.word_dim, self.word_dim))
         W_rec.name = "W_rec"
         self.params[W_rec.name] = W_rec
+        self._reg_params.append(W_rec)
         
         W_rec_init = np.random.uniform(
             low=-.2, high=.2, 
@@ -375,22 +487,22 @@ class RNNModel(object):
         
         if self.fit_init_ is True:
             next_pointer = current_pointer + self.word_dim
-            h_0 = self.theta[current_pointer:next_pointer].reshape(
+            h0 = self.theta[current_pointer:next_pointer].reshape(
                 (self.word_dim,))
-            h_0.name = "h_0"
-            self.params[h_0.name] = h_0   
+            h0.name = "h0"
+            self.params[h0.name] = h0   
             
-            h_0_init = np.random.uniform(
+            h0_init = np.random.uniform(
                 low=-.2, high=.2,
                 size=(self.word_dim,)).astype(theano.config.floatX)
-            inits.append(h_0_init)
+            inits.append(h0_init)
             current_pointer = next_pointer 
         else:
-            h_0 = theano.shared(
+            h0 = theano.shared(
                 value=np.zeros(self.word_dim, dtype=theano.config.floatX),
-                name="h_0", 
+                name="h0", 
                 borrow=True)
-            self.params[h_0.name] = h_0
+            self.params[h0.name] = h0
         
         # Initialize Feed-Forward NN component
         
@@ -446,168 +558,60 @@ class RNNModel(object):
         current_pointer = next_pointer
     
         self.theta.set_value(np.concatenate([x.ravel() for x in inits]))
-        
+       
+        # TODO: implement learnable embeddings
         E = theano.shared(self._embedding.W.astype(theano.config.floatX),
             name="E", borrow=True)
         self.params[E.name] = E
 
-    def build_network(self):
-        
-        self._debug_funcs = {}
-        
-        win_size = theano.shared(
-            value=np.ones(1) * self.window_size, name="win_size", borrow=True)
-        II = self.sym_vars["input"]
-        E = self.params["E"]    
-        M = self.sym_vars["mask"]
-        y_gold = self.sym_vars["y gold"]
-        
-        MAX_LEN = self.max_sent_len
-        
+        # If using adagrad, we need to keep a running sum of historical squared
+        # gradients for each parameter.
+        if self.update_method == "adagrad":
+            self.grad_hist = theano.shared(
+                np.zeros_like(self.theta.get_value(borrow=True)),
+                name="grad_hist",
+                borrow=True)
+
+    def _build_sentence_layer(self, X_iw, M_iw, y, E, max_sent_len, win_size):
+ 
         # Index into word embedding matrix and construct a 
         # 3d tensor for input. After dimshuffle, dimensions should
         # be (MAX_LEN * window_size, batch_size, word_dim).
-        x = E[II] 
-        x = x.dimshuffle(1,0,2)
+        X = E[X_iw] 
+        X = X.dimshuffle(1,0,2)
         
-        self._debug_funcs["x"] = theano.function([II], x)  
+        self._funcs["X"] = theano.function([X_iw], X)  
         
-        tensor_mask = M.dimshuffle(1,0).reshape((x.shape[0], x.shape[1], 1))
-        outputs_info = [
-            T.alloc(self.params["h_0"], x.shape[1], self.word_dim)] * \
-            self.window_size
+        M_T = M_iw.dimshuffle(1,0).reshape((X.shape[0], X.shape[1], 1))
+ 
+        self._funcs["M_T"] = theano.function(
+            [X_iw, M_iw], M_T) 
 
-        rnn_layer, _ = theano.scan(
-            fn=self.step_mask,
-            sequences=[{"input":x, "taps":[0, MAX_LEN, 2 * MAX_LEN]}, 
-                       {"input": tensor_mask, "taps":[0, MAX_LEN, 2 * MAX_LEN]}
-                      ], 
-            outputs_info=outputs_info,
-            n_steps=MAX_LEN)
-        rnn_layer = [o[-1] for o in rnn_layer]
-        self._rnn_layer = rnn_layer
-        self._debug_funcs["rnn layer"] = theano.function([II, M], rnn_layer)
-        a1 = self.params["b1"]
-        for i in xrange(self.window_size):
-            a1 += T.dot(rnn_layer[i], self.params["W1_s{}".format(i)])
-        h1 = T.tanh(a1)
-        self._h1 = h1
-        
-        self._nn_output = T.nnet.softmax(
-            T.dot(h1, self.params["W2"]) + self.params["b2"])
-        self._nn_output_func = theano.function([II, M], self._nn_output)
+        h0_block = T.alloc(self.params["h0"], X.shape[1], self.word_dim)
 
-        self._nll = -T.mean(
-            T.log(self._nn_output)[T.arange(y_gold.shape[0]), y_gold])      
-        reg = (self.params["W_rec"]**2).sum() + \
-              (self.params["W1_s1"]**2).sum() + \
-              (self.params["W1_s2"]**2).sum() + \
-              (self.params["W1_s0"]**2).sum() + \
-              (self.params["W2"]**2).sum()
-              #(self.params["V_rec"]**2).sum() + \
-        self._reg = reg
-        #self._cost = self._nll #+ self.lam * reg
-        
-    def step_mask(self, x1_t, x2_t, x3_t, 
-                  mask1, mask2, mask3,
-                  h1_tm1, h2_tm1, h3_tm1):
+        H_s = [] 
+        for i in xrange(win_size):
+            h_si, _ = theano.scan(
+                fn=self.step_mask,
+                sequences=[
+                    {"input": X,   "taps":[i * max_sent_len]}, 
+                    {"input": M_T, "taps":[i * max_sent_len]},], 
+                outputs_info=h0_block,
+                n_steps=max_sent_len)
+            h_si = h_si[-1]
+            H_s.append(h_si)
+            self._hidden_layers["h_s{}".format(i)] = h_si
 
-        h1_t, h2_t, h3_t = self.step(x1_t, h1_tm1, x2_t, h2_tm1, x3_t, h3_tm1)
-        h1_t = mask1 * h1_t + (1 - mask1) * h1_tm1
-        h2_t = mask2 * h2_t + (1 - mask2) * h2_tm1
-        h3_t = mask3 * h3_t + (1 - mask3) * h3_tm1
-        return h1_t, h2_t, h3_t
+        return H_s
+ 
+    def step_mask(self, x_t, m_t, h_tm1):
+        h_t_unmasked = self.step(x_t, h_tm1)
+        h_t = m_t * h_t_unmasked + (1 - m_t) * h_tm1
+        return h_t
     
-    def step(self, x1_t, h1_tm1, x2_t, h2_tm1, x3_t, h3_tm1):
+    def step(self, x_t, h_tm1):
         W_rec = self.params["W_rec"]
         V_rec = self.params["V_rec"]
         b_rec = self.params["b_rec"]
-        h1_t = T.tanh(T.dot(h1_tm1, V_rec) + T.dot(x1_t, W_rec) + b_rec)
-        h2_t = T.tanh(T.dot(h2_tm1, V_rec) + T.dot(x2_t, W_rec) + b_rec)
-        h3_t = T.tanh(T.dot(h3_tm1, V_rec) + T.dot(x3_t, W_rec) + b_rec)
-        return h1_t, h2_t, h3_t  
-    
-    def predict_prob_windows(self, IX):
-        mask = np.ones_like(IX)
-        mask[IX == self.pad] = 0
-        return self._nn_output_func(IX, mask)
-
-
-    def fit(self, X_train, y_train, X_dev=None, y_dev=None, 
-            X_gold=None, X_perm=None):
-        mask = np.ones_like(X_train)
-        mask[X_train == self.pad] = 0
-        
-        if X_dev is not None:
-            mask_dev = np.ones_like(X_dev)
-            mask_dev[X_dev == self.pad] = 0
-
-
-        X_shared = theano.shared(X_train.astype(np.int32),
-            name="X_shared",
-            borrow=True)
-        y_shared = theano.shared(y_train.astype(np.int32),
-            name="y_shared",
-            borrow=True)
-        mask_shared = theano.shared(mask.astype(np.int32),
-            name="mask_shared",
-            borrow=True)
-   
-        y = self.sym_vars["y gold"]
-        II = self.sym_vars["input"]
-        M = self.sym_vars["mask"]
-        
-        adagrad = theano.shared(
-            np.zeros(self.theta.get_value(borrow=True).shape[0],
-                dtype=theano.config.floatX),
-            name="adagrad",
-            borrow=True)
-
-        n_batches = X_shared.get_value(borrow=True).shape[0] / self.batch_size
-        cost = self._nll + self.lam * self._reg / (2. * II.shape[0])
-        gtheta = T.grad(cost, self.theta)
-
-        # diagonal adagrad update
-        adagrad += gtheta**2
-        delta = self.learning_rate * (gtheta / T.sqrt(adagrad))
-        updates = [(self.theta, self.theta - self.learning_rate * gtheta)]
-        
-        
-        index = T.scalar(dtype='int32')  # index to a [mini]batch
-        train_model = theano.function(
-            inputs=[index],
-            outputs=[cost, gtheta, adagrad],
-            updates=updates,
-            givens={
-                II: X_shared[
-                    index * self.batch_size : (index+1) * self.batch_size],
-                y: y_shared[
-                    index * self.batch_size : (index+1) * self.batch_size],
-                M: mask_shared[
-                    index * self.batch_size : (index+1) * self.batch_size],
-            }
-        )
-        
-        pred = T.argmax(self._nn_output, axis=1)
-        err = T.mean(T.neq(y, pred))
-        avg_err = theano.function([II, y, M], err)
-
-        for n_iter in xrange(self.max_iters):
-            print "iter", n_iter
-            for i in xrange(n_batches):
-                train_model(i)
-            print avg_err(X_train, y_train, mask)
-            if X_dev is not None and y_dev is not None:
-                print "avg err", avg_err(X_dev, y_dev, mask_dev)
-            if X_gold is not None and X_perm is not None:
-                rank_err = 0
-                total = 0
-                for x_gold, x_perm in izip(X_gold, X_perm):
-                    lp_gold = np.log(
-                        self.predict_prob_windows(x_gold)[:,1]).sum()
-                    lp_perm = np.log(
-                        self.predict_prob_windows(x_perm)[:,1]).sum()
-                    if lp_gold > lp_perm:
-                        rank_err += 1
-                    total += 1
-                print "DEV DOC ERR", float(rank_err) / total
+        h_t = T.tanh(T.dot(h_tm1, V_rec) + T.dot(x_t, W_rec) + b_rec)
+        return h_t
