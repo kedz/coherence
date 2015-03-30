@@ -8,9 +8,10 @@ import datetime
 from sklearn.base import BaseEstimator
 
 class NNModel(BaseEstimator):
-    def __init__(self, embedding, max_sent_len, hidden_dim=100, window_size=3, 
-                 learning_rate=.01, max_iters=50, batch_size=25, lam=1.25,
-                 fit_init=True, fit_embeddings=False, fit_callback=None, 
+    def __init__(self, embeddings=None, max_sent_len=150,  
+                 hidden_dim=100, window_size=3, learning_rate=.01, 
+                 max_iters=50, batch_size=25, lam=1.25, fit_init=True,
+                 fit_embeddings=False, fit_callback=None, 
                  update_method="adagrad"):
         """
         Base class for Neural Network based coherence models.
@@ -26,7 +27,8 @@ class NNModel(BaseEstimator):
         
         params
         ------
-        embedding -- cohere.embed.WordEmbedding or subclass,
+        embeddings -- a V x D word embedding matrix where V is the vocab size
+            and D is the word embedding dimension
         max_sent_len -- int, maximum sentence length of input sentences,
             sentences shorter than this should be padded with a __PAD__ token.
             Each row in input matrix should have (window_size * max_sent_len)
@@ -53,28 +55,26 @@ class NNModel(BaseEstimator):
         """                  
         assert update_method in ["sgd", "adagrad"]
 
+        self.embeddings = embeddings
         self.max_sent_len = max_sent_len
         self.hidden_dim = hidden_dim
+        self.window_size = window_size
         self.learning_rate = learning_rate
-        self.update_method = update_method
         self.max_iters = max_iters
         self.batch_size = batch_size
         self.lam = lam
-        self._embedding = embedding
-        self.pad = embedding.get_index("__PAD__")
-        self.word_dim = embedding.embed_dim
-        self.window_size = window_size
-        self.fit_embeddings_ = fit_embeddings
-        self.fit_init_ = fit_init
+        self.fit_init = fit_init
+        self.fit_embeddings = fit_embeddings
         self.fit_callback = fit_callback
+        self.update_method = update_method
 
         self.sym_vars = {u"X_iw": T.imatrix(name=u"X_iw"),
                          u"y": T.ivector(name=u"y"),
                          u"M_iw": T.imatrix(name=u"M_iw")} 
 
-        
-        self.init_params()
-        self.build_network(self.max_sent_len, self.window_size)
+        if embeddings is not None:
+            self.init_params(self.embeddings)
+            self.build_network(self.max_sent_len, self.window_size)
 
     def build_network(self, max_sent_len, win_size):
         
@@ -122,17 +122,16 @@ class NNModel(BaseEstimator):
         
     def _mask(self, X_iw):
         M_iw = np.ones_like(X_iw)
-        M_iw[X_iw == self.pad] = 0
+        M_iw[X_iw == self.embeddings.get_index("__PAD__")] = 0
         return M_iw
 
     def avg_win_err(self, X_iw, y):
         M_iw = self._mask(X_iw)
         return float(self._funcs["avg win error"](X_iw, M_iw, y))
 
-    def predict_prob_windows(self, IX):
-        mask = np.ones_like(IX)
-        mask[IX == self.pad] = 0
-        return self._nn_output_func(IX, mask)
+    def predict_prob_windows(self, X_iw):
+        M_iw = self._mask(X_iw)
+        return self._nn_output_func(X_iw, M_iw)
 
     def log_prob_is_coherent(self, IX):
         return np.log(self.predict_prob_windows(IX)[:,1]).sum()
@@ -229,59 +228,63 @@ class NNModel(BaseEstimator):
                self.fit_callback(self, avg_win_err, n_iter)            
 
 
-#    def __getstate__(self):
-#        """ Return state sequence."""
-#        params = self._get_params() # parameters set in constructor
-#        theta = self.theta.get_value()
-#        state = (params, theta)
-#        return state
-#
-#    def _set_weights(self, theta):
-#        """ Set fittable parameters from weights sequence."""
-#        self.theta.set_value(theta)
-#
-#    def __setstate__(self, state):
-#        """ Set parameters from state sequence."""
-#        params, theta = state
-#        self.set_params(**params)
-#        self.ready()
-#        self._set_weights(theta)
-#
-#    def save(self, fpath='.', fname=None):
-#        """ Save a pickled representation of Model state. """
-#        fpathstart, fpathext = os.path.splitext(fpath)
-#        if fpathext == '.pkl':
-#            # User supplied an absolute path to a pickle file
-#            fpath, fname = os.path.split(fpath)
-#        elif fname is None:
-#            # Generate filename based on date
-#            date_obj = datetime.datetime.now()
-#            date_str = date_obj.strftime('%Y-%m-%d-%H:%M:%S')
-#            class_name = self.__class__.__name__
-#            fname = '%s.%s.pkl' % (class_name, date_str)
-#        fabspath = os.path.join(fpath, fname)
-#        print("Saving to %s ..." % fabspath)
-#        with open(fabspath, 'wb') as f:
-#            state = self.__getstate__()
-#            pickle.dump(state, file, protocol=pickle.HIGHEST_PROTOCOL)
-#        
-#    def load(self, path):
-#        """ Load model parameters from path. """
-#        print("Loading from %s ..." % path)
-#        with open(path, 'rb') as f:
-#            state = pickle.load(f)
-#            self.__setstate__(state)
+    def _get_params(self):
+        return {key: val
+                for key, val in self.get_params().items()
+                if key != "fit_callback"} #and val is not None:
+        
+        
+    def __getstate__(self):
+        """ Return state sequence."""
+        params = self._get_params() 
+        theta = self.theta.get_value() 
+        state = (params, theta)
+        return state
+
+    def __setstate__(self, state):
+        """ Set parameters from state sequence."""
+        params, theta = state
+        self.set_params(**params)
+        self.init_params(self.embeddings)
+        self.build_network(self.max_sent_len, self.window_size)
+        self.theta.set_value(theta)
+
+    def save(self, fpath='.', fname=None):
+        """ Save a pickled representation of Model state. """
+        fpathstart, fpathext = os.path.splitext(fpath)
+        if fpathext == '.pkl':
+            # User supplied an absolute path to a pickle file
+            fpath, fname = os.path.split(fpath)
+        elif fname is None:
+            # Generate filename based on date
+            date_obj = datetime.datetime.now()
+            date_str = date_obj.strftime('%Y-%m-%d-%H:%M:%S')
+            class_name = self.__class__.__name__
+            fname = '%s.%s.pkl' % (class_name, date_str)
+        fabspath = os.path.join(fpath, fname)
+        print("Saving to %s ..." % fabspath)
+        with open(fabspath, 'wb') as f:
+            state = self.__getstate__()
+            pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+        
+    def load(self, path):
+        """ Load model parameters from path. """
+        print("Loading from %s ..." % path)
+        with open(path, 'rb') as f:
+            state = pickle.load(f)
+            self.__setstate__(state)
 
 
 class CBOWModel(NNModel):
-    def init_params(self):
+    def init_params(self, embeddings):
+        word_dim = embeddings.embed_dim
         self.params = {}
         self._reg_params = []
         
         # Number of params for W1_s1, W1_s2, ... W1_s(window_size) and b1,
         # and W2 + b2
 
-        n_feedforward_params = self.hidden_dim * self.word_dim * \
+        n_feedforward_params = self.hidden_dim * word_dim * \
             self.window_size + self.hidden_dim + 2 * self.hidden_dim + 2
  
         print "n_feedforward_params:", n_feedforward_params
@@ -302,16 +305,16 @@ class CBOWModel(NNModel):
         
         # Init W1_s...
         for i in xrange(self.window_size):
-            next_pointer = current_pointer + self.hidden_dim * self.word_dim
+            next_pointer = current_pointer + self.hidden_dim * word_dim
             W1_s = self.theta[current_pointer:next_pointer].reshape(
-                (self.word_dim, self.hidden_dim))
+                (word_dim, self.hidden_dim))
             W1_s.name="W1_s{}".format(i)
             self.params[W1_s.name] = W1_s
             self._reg_params.append(W1_s)            
 
             W1_s_init = np.random.uniform(
                 low=-.2, high=.2, 
-                size=(self.word_dim, self.hidden_dim)).astype(
+                size=(word_dim, self.hidden_dim)).astype(
                     theano.config.floatX)
             inits.append(W1_s_init)
             current_pointer = next_pointer
@@ -355,7 +358,7 @@ class CBOWModel(NNModel):
     
         self.theta.set_value(np.concatenate([x.ravel() for x in inits]))
         
-        E = theano.shared(self._embedding.W.astype(theano.config.floatX),
+        E = theano.shared(embeddings.W.astype(theano.config.floatX),
             name="E", borrow=True)
         self.params[E.name] = E
 
@@ -397,7 +400,9 @@ class CBOWModel(NNModel):
 
 class RNNModel(NNModel):
         
-    def init_params(self):    
+    def init_params(self, embeddings):    
+
+        word_dim = embeddings.embed_dim
 
         # params is a dict mapping variable name to theano Variable objects.
         self.params = {}
@@ -407,19 +412,19 @@ class RNNModel(NNModel):
         self._reg_params = []
         
         # Number of params for W_rec + V_rec + b_rec
-        n_recurrent_params = self.word_dim**2 + self.word_dim**2 + \
-            self.word_dim
+        n_recurrent_params = word_dim**2 + word_dim**2 + \
+            word_dim
         
-        # If we are fitting h_0, allocate self.word_dim params for this 
+        # If we are fitting h_0, allocate word_dim params for this 
         # variable.
         if self.fit_init_ is True:
-            n_recurrent_params += self.word_dim
+            n_recurrent_params += word_dim
         
         print "n_recurrent_params:", n_recurrent_params
         
         # Number of params for W1_s1, W1_s2, ... W1_s(window_size) and b1,
         # and W2 + b2
-        n_feedforward_params = self.hidden_dim * self.word_dim * \
+        n_feedforward_params = self.hidden_dim * word_dim * \
             self.window_size + self.hidden_dim + 2 * self.hidden_dim + 2
         
         print "n_feedforward_params:", n_feedforward_params
@@ -446,60 +451,60 @@ class RNNModel(NNModel):
         # Initialize RNN component
         
         # Init W_rec (word_dim x word_dim)
-        next_pointer = current_pointer + self.word_dim**2
+        next_pointer = current_pointer + word_dim**2
         W_rec = self.theta[current_pointer:next_pointer].reshape(
-            (self.word_dim, self.word_dim))
+            (word_dim, word_dim))
         W_rec.name = "W_rec"
         self.params[W_rec.name] = W_rec
         self._reg_params.append(W_rec)
         
         W_rec_init = np.random.uniform(
             low=-.2, high=.2, 
-            size=(self.word_dim, self.word_dim)).astype(
+            size=(word_dim, word_dim)).astype(
                 theano.config.floatX)
         inits.append(W_rec_init)
         current_pointer = next_pointer
         
         # Init V_rec (word_dim x word_dim)
-        next_pointer = current_pointer + self.word_dim**2
+        next_pointer = current_pointer + word_dim**2
         V_rec = self.theta[current_pointer:next_pointer].reshape(
-            (self.word_dim, self.word_dim))
+            (word_dim, word_dim))
         V_rec.name = "V_rec"
         self.params[V_rec.name] = V_rec
         
         V_rec_init = np.random.uniform(
             low=-.2, high=.2, 
-            size=(self.word_dim, self.word_dim)).astype(
+            size=(word_dim, word_dim)).astype(
                 theano.config.floatX)
         inits.append(V_rec_init)
         current_pointer = next_pointer
         
         # Init b_rec (word_dim)
-        next_pointer = current_pointer + self.word_dim
+        next_pointer = current_pointer + word_dim
         b_rec = self.theta[current_pointer:next_pointer].reshape(
-            (self.word_dim,))
+            (word_dim,))
         b_rec.name = "b_rec"
         self.params[b_rec.name] = b_rec
         
-        b_rec_init = np.zeros(self.word_dim, dtype=theano.config.floatX)
+        b_rec_init = np.zeros(word_dim, dtype=theano.config.floatX)
         inits.append(b_rec_init)
         current_pointer = next_pointer       
         
         if self.fit_init_ is True:
-            next_pointer = current_pointer + self.word_dim
+            next_pointer = current_pointer + word_dim
             h0 = self.theta[current_pointer:next_pointer].reshape(
-                (self.word_dim,))
+                (word_dim,))
             h0.name = "h0"
             self.params[h0.name] = h0   
             
             h0_init = np.random.uniform(
                 low=-.2, high=.2,
-                size=(self.word_dim,)).astype(theano.config.floatX)
+                size=(word_dim,)).astype(theano.config.floatX)
             inits.append(h0_init)
             current_pointer = next_pointer 
         else:
             h0 = theano.shared(
-                value=np.zeros(self.word_dim, dtype=theano.config.floatX),
+                value=np.zeros(word_dim, dtype=theano.config.floatX),
                 name="h0", 
                 borrow=True)
             self.params[h0.name] = h0
@@ -508,15 +513,15 @@ class RNNModel(NNModel):
         
         # Init W1_s...
         for i in xrange(self.window_size):
-            next_pointer = current_pointer + self.hidden_dim * self.word_dim
+            next_pointer = current_pointer + self.hidden_dim * word_dim
             W1_s = self.theta[current_pointer:next_pointer].reshape(
-                (self.word_dim, self.hidden_dim))
+                (word_dim, self.hidden_dim))
             W1_s.name="W1_s{}".format(i)
             self.params[W1_s.name] = W1_s
             
             W1_s_init = np.random.uniform(
                 low=-.2, high=.2, 
-                size=(self.word_dim, self.hidden_dim)).astype(
+                size=(word_dim, self.hidden_dim)).astype(
                     theano.config.floatX)
             inits.append(W1_s_init)
             current_pointer = next_pointer
@@ -560,7 +565,7 @@ class RNNModel(NNModel):
         self.theta.set_value(np.concatenate([x.ravel() for x in inits]))
        
         # TODO: implement learnable embeddings
-        E = theano.shared(self._embedding.W.astype(theano.config.floatX),
+        E = theano.shared(embeddings.W.astype(theano.config.floatX),
             name="E", borrow=True)
         self.params[E.name] = E
 
@@ -587,7 +592,7 @@ class RNNModel(NNModel):
         self._funcs["M_T"] = theano.function(
             [X_iw, M_iw], M_T) 
 
-        h0_block = T.alloc(self.params["h0"], X.shape[1], self.word_dim)
+        h0_block = T.alloc(self.params["h0"], X.shape[1], X.shape[2])
 
         H_s = [] 
         for i in xrange(win_size):
