@@ -1,8 +1,7 @@
-from cohere.structs import negative_window_gen, positive_window_gen
+#bbfrom cohere.structs import negative_window_gen, positive_window_gen
 import os
 import gzip
 import numpy as np
-import random
 
 class WordEmbeddings(object):
     def __init__(self, token2index, embeddings):
@@ -243,11 +242,13 @@ class IndexDocTransformer(object):
         for doc_perm in docs_perms:
             gold_doc = doc_perm["gold"]
             [gold_idoc] = self._docs2index_docs([gold_doc], 
-                                                self.max_sent_len)
+                                                self.max_sent_len,
+                                                make_safe=True)
             ix_gold = self._index_docs2windows([gold_idoc], self.window_size, 
                 self.max_sent_len, positive=True)
             perm_idocs = self._docs2index_docs(doc_perm["perms"], 
-                                               self.max_sent_len)
+                                               self.max_sent_len,
+                                               make_safe=True)
             ix_perms = \
                 [self._index_docs2windows(
                     [perm_idoc], self.window_size, self.max_sent_len, 
@@ -258,11 +259,14 @@ class IndexDocTransformer(object):
                 IX_gold.append(ix_gold)
                 IX_perm.append(ix_perm)
             
-            assert len(IX_gold) == len(IX_perm)
-            return IX_gold, IX_perm
+        assert len(IX_gold) == len(IX_perm)
+        return IX_gold, IX_perm
 
     def transform(self, docs):
         index_docs = self._docs2index_docs(docs, self.max_sent_len) 
+        index_docs = [index_doc for index_doc in index_docs
+                      if len(index_doc) - self.start_pads - self.stop_pads \
+                          > self.window_size]
         IX_pos = self._index_docs2windows(index_docs, self.window_size, 
             self.max_sent_len, positive=True)
         
@@ -275,13 +279,13 @@ class IndexDocTransformer(object):
         X = np.vstack([IX_pos, IX_neg])
 
         rnd = range(IX_pos.shape[0] * 2)
-        random.shuffle(rnd)
+        np.random.shuffle(rnd)
         X = X[rnd,:]
         y = y[rnd]
 
         return X, y
 
-    def _docs2index_docs(self, docs, max_sent_len):
+    def _docs2index_docs(self, docs, max_sent_len, make_safe=False):
         
         start = self.embedding.get_index("__START__")
         stop = self.embedding.get_index("__STOP__")
@@ -302,6 +306,21 @@ class IndexDocTransformer(object):
             # Add stop padding.
             for _ in xrange(self.stop_pads):
                 I_d.append([stop,] + [pad] * (max_sent_len - 1))
+
+            if make_safe is True:
+                diff = len(I_d) - self.start_pads - self.stop_pads 
+                c = 0
+                if diff < self.window_size:
+                    print "make safe", len(I_d),
+                    while diff < self.window_size:
+                        if c % 2 == 0:
+                            I_d.insert(0, [start,] + [pad] * (max_sent_len - 1))
+                        else:
+                            I_d.append([stop,] + [pad] * (max_sent_len - 1))
+                        c += 1
+                        diff += 1
+
+                    print "safe", len(I_d)
 
             II.append(np.array(I_d, dtype=np.int32))
 
@@ -362,7 +381,7 @@ class IndexDocTransformer(object):
 
     def _doc2neg_windows_gen(self, index_doc, size):
         n_sents = len(index_doc)
-        if n_sents < size - self.start_pads - self.stop_pads:
+        if n_sents - self.start_pads - self.stop_pads < size:
             raise Exception("Window size larger than document size.")
         if size % 2 == 0:
             raise Exception("Window size must be an odd number.")
@@ -375,7 +394,7 @@ class IndexDocTransformer(object):
                 range(self.start_pads) + \
                 range(n_sents - self.stop_pads, n_sents))
             rand_index = range(0, n_sents)
-            random.shuffle(rand_index)
+            np.random.shuffle(rand_index)
             while rand_index[-1] in bad_indices:
                 rand_index.pop()
             rand_index = rand_index[-1]
