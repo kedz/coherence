@@ -5,7 +5,7 @@ from StringIO import StringIO
 import corenlp.server
 import corenlp.client
 import gzip
-import pickle
+import cPickle as pickle
 import random
 import re
 
@@ -93,15 +93,18 @@ def preprocess_barzilay_apws(path_to_apws_tgz, path_to_apws_clean_tgz,
                 info.size=len(perm_text.buf)
                 info.mtime = time.time()
                 tar.addfile(tarinfo=info, fileobj=perm_text) 
+    
 
     with tarfile.open(path_to_apws_clean_tgz, u"w:gz") as tar:
+        print "Writing train apws clean docs/perms..."
         write_partition(tar, train_instances, "train")
+        print "Writing test apws clean docs/perms..."
         write_partition(tar, test_instances, "test")
 
     corenlp_props = {"ssplit.newlineIsSentenceBreak": "always"}
     annotators = ["tokenize", "ssplit", "pos", "lemma", "ner", "depparse"]
     corenlp.server.start(corenlp_props=corenlp_props, mem="32G",
-                         annotators=annotators, threads=4)
+                         annotators=annotators, threads=8)
     client = corenlp.client.CoreNLPClient()
 
     def ann(instances):
@@ -109,16 +112,16 @@ def preprocess_barzilay_apws(path_to_apws_tgz, path_to_apws_clean_tgz,
         doc_data = []
         instances = instances.items()
         random.shuffle(instances)
-        for instance_name, instance in instances:
+        n_instances = len(instances)
+        for n_instance, (instance_name, instance) in enumerate(instances, 1):
             gold_text = instance[u"gold"]
-
+            print "{}/{}".format(n_instance, n_instances), instance_name
             gold_xml = client.annotate(gold_text, return_xml=True)
             perm_texts = [perm for perm_no, perm in instance[u"perms"]] 
-            print "n perms", len(perm_texts) 
             perm_xmls = client.annotate_mp(
                 perm_texts, return_xml=True, n_procs=2)
 
-
+            
             xml_data.append({u"gold": gold_xml, u"perms": perm_xmls})
             gold_doc = corenlp.read_xml(StringIO(gold_xml.encode(u"utf-8")))
 
@@ -128,7 +131,9 @@ def preprocess_barzilay_apws(path_to_apws_tgz, path_to_apws_clean_tgz,
             doc_data.append({u"gold": gold_doc, u"perms": perm_docs})
         return xml_data, doc_data
 
+    print "Annotating test data..."
     test_xml_perm_data, test_doc_perm_data = ann(test_instances)
+    print "Writing test data..."
     with gzip.open(path_to_xml_test_perm_pkl_tgz, u"w") as f:
         pickle.dump(test_xml_perm_data, f)
     with gzip.open(path_to_doc_test_perm_pkl_tgz, u"w") as f:
@@ -136,12 +141,14 @@ def preprocess_barzilay_apws(path_to_apws_tgz, path_to_apws_clean_tgz,
     with gzip.open(path_to_doc_test_pkl_tgz, u"w") as f:
         pickle.dump([inst[u"gold"] for inst in test_doc_perm_data], f)
 
+    print "Annotating train data..."
     train_xml_perm_data, train_doc_perm_data = ann(train_instances)
     dev_xml_perm_data = train_xml_perm_data[90:]
     dev_doc_perm_data = train_doc_perm_data[90:]
     train_xml_perm_data = train_xml_perm_data[:90]
     train_doc_perm_data = train_doc_perm_data[:90]
 
+    print "Writing training data..."
     with gzip.open(path_to_xml_train_perm_pkl_tgz, u"w") as f:
         pickle.dump(train_xml_perm_data, f)
     with gzip.open(path_to_doc_train_perm_pkl_tgz, u"w") as f:
@@ -149,6 +156,7 @@ def preprocess_barzilay_apws(path_to_apws_tgz, path_to_apws_clean_tgz,
     with gzip.open(path_to_doc_train_pkl_tgz, u"w") as f:
         pickle.dump([inst[u"gold"] for inst in train_doc_perm_data], f)
 
+    print "Writing dev data..."
     with gzip.open(path_to_xml_dev_perm_pkl_tgz, u"w") as f:
         pickle.dump(dev_xml_perm_data, f)
     with gzip.open(path_to_doc_dev_perm_pkl_tgz, u"w") as f:
@@ -236,22 +244,26 @@ def preprocess_barzilay_ntsb(path_to_ntsb_tgz, path_to_ntsb_clean_tgz,
                 tar.addfile(tarinfo=info, fileobj=perm_text) 
 
     with tarfile.open(path_to_ntsb_clean_tgz, u"w:gz") as tar:
+        print "Writing train ntsb clean docs/perms..."
         write_partition(tar, train_instances, "train")
+        print "Writing test ntsb clean docs/perms..."
         write_partition(tar, test_instances, "test")
 
     corenlp_props = {"ssplit.newlineIsSentenceBreak": "always"}
 
     annotators = ["tokenize", "ssplit", "pos", "lemma", "ner", "depparse"]
     corenlp.server.start(corenlp_props=corenlp_props, mem="32G",
-                         annotators=annotators, threads=4)
+                         annotators=annotators, threads=8)
     client = corenlp.client.CoreNLPClient()
 
     def ann(instances):
         xml_data = []
         doc_data = []
         instances = instances.items()
+        n_instances = len(instances)
         random.shuffle(instances)
-        for instance_name, instance in instances:
+        for n_instance, (instance_name, instance) in enumerate(instances, 1):
+            print "{}/{}".format(n_instance, n_instances), instance_name
             gold_text = instance[u"gold"]
             gold_xml = client.annotate(gold_text, return_xml=True)
             perm_texts = [perm for perm_no, perm in instance[u"perms"]] 
@@ -267,7 +279,9 @@ def preprocess_barzilay_ntsb(path_to_ntsb_tgz, path_to_ntsb_clean_tgz,
             doc_data.append({u"gold": gold_doc, u"perms": perm_docs})
         return xml_data, doc_data
 
+    print "Annotating test data..."
     test_xml_perm_data, test_doc_perm_data = ann(test_instances) 
+    print "Writing test data..."
     with gzip.open(path_to_xml_test_perm_pkl_tgz, u"w") as f:
         pickle.dump(test_xml_perm_data, f)
     with gzip.open(path_to_doc_test_perm_pkl_tgz, u"w") as f:
@@ -275,12 +289,14 @@ def preprocess_barzilay_ntsb(path_to_ntsb_tgz, path_to_ntsb_clean_tgz,
     with gzip.open(path_to_doc_test_pkl_tgz, u"w") as f:
         pickle.dump([inst[u"gold"] for inst in test_doc_perm_data], f)
 
+    print "Annotating train data..."
     train_xml_perm_data, train_doc_perm_data = ann(train_instances) 
     dev_xml_perm_data = train_xml_perm_data[90:]
     dev_doc_perm_data = train_doc_perm_data[90:]
     train_xml_perm_data = train_xml_perm_data[:90]
     train_doc_perm_data = train_doc_perm_data[:90]
 
+    print "Writing train data..."
     with gzip.open(path_to_xml_train_perm_pkl_tgz, u"w") as f:
         pickle.dump(train_xml_perm_data, f)
     with gzip.open(path_to_doc_train_perm_pkl_tgz, u"w") as f:
@@ -355,4 +371,3 @@ if __name__ == "__main__":
                              u"data/barzilay_apws_clean_doc_train.pkl.gz",
                              u"data/barzilay_apws_clean_doc_dev.pkl.gz",
                              u"data/barzilay_apws_clean_doc_test.pkl.gz")
-
