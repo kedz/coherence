@@ -302,6 +302,8 @@ class CBOWModel(NNModel):
         inits = []
 
         # Initialize Feed-Forward NN component
+
+        eps = np.sqrt(6. / (self.hidden_dim + word_dim * self.window_size))
         
         # Init W1_s...
         for i in xrange(self.window_size):
@@ -313,7 +315,7 @@ class CBOWModel(NNModel):
             self._reg_params.append(W1_s)            
 
             W1_s_init = np.random.uniform(
-                low=-.2, high=.2, 
+                low=-eps, high=eps, 
                 size=(word_dim, self.hidden_dim)).astype(
                     theano.config.floatX)
             inits.append(W1_s_init)
@@ -417,7 +419,7 @@ class RNNModel(NNModel):
         
         # If we are fitting h_0, allocate word_dim params for this 
         # variable.
-        if self.fit_init_ is True:
+        if self.fit_init is True:
             n_recurrent_params += word_dim
         
         print "n_recurrent_params:", n_recurrent_params
@@ -490,7 +492,7 @@ class RNNModel(NNModel):
         inits.append(b_rec_init)
         current_pointer = next_pointer       
         
-        if self.fit_init_ is True:
+        if self.fit_init is True:
             next_pointer = current_pointer + word_dim
             h0 = self.theta[current_pointer:next_pointer].reshape(
                 (word_dim,))
@@ -511,6 +513,8 @@ class RNNModel(NNModel):
         
         # Initialize Feed-Forward NN component
         
+        eps = np.sqrt(6. / (self.hidden_dim + word_dim * self.window_size))
+
         # Init W1_s...
         for i in xrange(self.window_size):
             next_pointer = current_pointer + self.hidden_dim * word_dim
@@ -520,7 +524,7 @@ class RNNModel(NNModel):
             self.params[W1_s.name] = W1_s
             
             W1_s_init = np.random.uniform(
-                low=-.2, high=.2, 
+                low=-eps, high=eps, 
                 size=(word_dim, self.hidden_dim)).astype(
                     theano.config.floatX)
             inits.append(W1_s_init)
