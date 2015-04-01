@@ -264,12 +264,19 @@ class EntityGridVectorizer(object):
             self._salience_index_offset = index      
             self._n_dims = 2 * index        
     
-
-#    def fit_transform(self, X, y=None):
-#        return self.transform(X)
-
-#    def fit(self, X, y=None):
-#        pass
+    def transform(self, E):
+        if isinstance(E, EntityGrid):
+            x = np.zeros((1, self._n_dims), dtype=np.float64)
+            self._get_unnormalized_row(x[0, :], E)
+            self._normalize(x)
+            return x
+        else:
+            n_grids = len(E)
+            X = np.zeros((n_grids, self._n_dims), dtype=np.float64)
+            for row, e in enumerate(E):
+                self._get_unnormalized_row(X[row, :], e)
+            self._normalize(X)
+            return X        
 
     def pairwise_transform(self, E_P):
 
