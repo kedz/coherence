@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import sys
 import os
 from cohere.models import CBOWModel
 import cohere.data
@@ -38,16 +39,16 @@ def result2path(dir, result):
         int(result["batch"]))
     return os.path.join(dir, fname)
 
-def main(output_model_dir):
+def main(output_model_dir, corpus):
     
-    docs_perms = cohere.data.get_barzilay_ntsb_clean_docs_perms(
-        "train", tokens_only=True) + \
-        cohere.data.get_barzilay_ntsb_clean_docs_perms(
-            "dev", tokens_only=True)
+    docs_perms = cohere.data.get_barzilay_clean_docs_perms(
+        corpus=corpus, part="train", tokens_only=True) + \
+        cohere.data.get_barzilay_clean_docs_perms(
+            corpus=corpus, part="dev", tokens_only=True)
     docs = [dp["gold"] for dp in docs_perms]
 
-    docs_perms_test = cohere.data.get_barzilay_ntsb_clean_docs_perms(
-        "test", tokens_only=True)
+    docs_perms_test = cohere.data.get_barzilay_clean_docs_perms(
+        corpus=corpus, part="test", tokens_only=True)
 
     vocab = make_vocab(docs)
     senna = cohere.embed.SennaEmbeddings()
@@ -154,8 +155,18 @@ def main(output_model_dir):
             print len(docs_perms["gold"])
 
 if __name__ ==  u"__main__":
-    output_dir = os.path.join(
-        os.getenv("COHERENCE_DATA", "data"), "models", "ntsb.cbow")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    main(output_dir)
+    args = sys.argv
+    assert len(args) == 2
+    assert args[1] in ["ntsb", "apws"]
+    if args[1] == "ntsb": 
+        output_dir = os.path.join(
+            os.getenv("COHERENCE_DATA", "data"), "models", "ntsb.cbow")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+    if args[1] == "apws": 
+        output_dir = os.path.join(
+            os.getenv("COHERENCE_DATA", "data"), "models", "apws.cbow")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+    main(output_dir, args[1])
