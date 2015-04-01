@@ -31,7 +31,7 @@ def result2path(dir, result):
 
 def main(output_model_dir, corpus, max_folds=10):
     
-    C = [1., 2., 2.5, 10., 100.]
+    C = [1., 2., 2.5, 10., 100., 500., 1000.]
 
     print C
     D_P_train = cohere.data.get_barzilay_clean_docs_perms(

@@ -61,11 +61,11 @@ def main(output_model_dir, corpus):
 
     max_folds = 10
     max_iters = 10
-    learning_rates = [0.01, 0.05,] # 0.075, .1]
+    learning_rates = [0.01,] # 0.05,] # 0.075, .1]
 
-    batch_sizes = [20,  25, 30,]# 50, 100]
+    batch_sizes = [25, ] #[20,  25, 30,]# 50, 100]
     window_sizes = [3, 5, 7]
-    lambdas = [0, 0.01, 0.1, 0.25, 0.5, 1.0, 1.25, 2.0, 2.5, 5.0]
+    lambdas = [0.01, 0.1, 0.25, 0.5, 1.0, 1.25, 2.0, 2.5, 5.0]
 
     n_settings = len(batch_sizes) * len(window_sizes) * len(lambdas) * \
         len(learning_rates)
