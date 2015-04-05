@@ -49,8 +49,9 @@ def main(output_model_dir, corpus):
 
     docs_perms_test = cohere.data.get_barzilay_clean_docs_perms(
         corpus=corpus, part="test", tokens_only=True)
+    docs_test [dpt["gold"] for dpt in docs_perms_test]
 
-    vocab = make_vocab(docs)
+    vocab = make_vocab(docs+docs_test)
     senna = cohere.embed.SennaEmbeddings()
     embed = cohere.embed.BorrowingWordEmbeddings(vocab, senna)
 
