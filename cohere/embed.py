@@ -262,7 +262,7 @@ class IndexDocTransformer(object):
         assert len(IX_gold) == len(IX_perm)
         return IX_gold, IX_perm
 
-    def transform(self, docs):
+    def transform(self, docs, shuffle=True):
         index_docs = self._docs2index_docs(docs, self.max_sent_len) 
         index_docs = [index_doc for index_doc in index_docs
                       if len(index_doc) - self.start_pads - self.stop_pads \
@@ -278,10 +278,11 @@ class IndexDocTransformer(object):
 
         X = np.vstack([IX_pos, IX_neg])
 
-        rnd = range(IX_pos.shape[0] * 2)
-        np.random.shuffle(rnd)
-        X = X[rnd,:]
-        y = y[rnd]
+        if shuffle is True:
+            rnd = range(IX_pos.shape[0] * 2)
+            np.random.shuffle(rnd)
+            X = X[rnd,:]
+            y = y[rnd]
 
         return X, y
 
