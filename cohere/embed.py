@@ -2,6 +2,7 @@
 import os
 import gzip
 import numpy as np
+from itertools import izip
 
 class WordEmbeddings(object):
     def __init__(self, token2index, embeddings):
@@ -115,17 +116,19 @@ class BorrowingWordEmbeddings(WordEmbeddings):
                 #    return v
             new_vector_func = nvf
 
-        new_vocab.add("__START__")
-        new_vocab.add("__STOP__")
-        new_vocab.add("__UNKNOWN__")
-        new_vocab.add("__PAD__")
         new_vocab = list(new_vocab)
         new_vocab.sort()
+        new_vocab.append("__UNKNOWN__")
+        new_vocab.append("__PAD__")
+
+        self.special_token_start_index = len(new_vocab)
+        new_vocab.append("__START__")        
+        new_vocab.append("__STOP__")
         vocab_size = len(new_vocab)
         token2index = {}
 
         embed = []
-        for token, index in zip(new_vocab, xrange(vocab_size)):
+        for token, index in izip(new_vocab, xrange(vocab_size)):
             token2index[token] = index
             if token in bootstrap_embedding:
                 embed.append(bootstrap_embedding.get_embedding(token))
@@ -263,28 +266,83 @@ class IndexDocTransformer(object):
         return IX_gold, IX_perm
 
     def transform(self, docs, shuffle=True):
-        index_docs = self._docs2index_docs(docs, self.max_sent_len) 
-        index_docs = [index_doc for index_doc in index_docs
-                      if len(index_doc) - self.start_pads - self.stop_pads \
-                          > self.window_size]
-        IX_pos = self._index_docs2windows(index_docs, self.window_size, 
-            self.max_sent_len, positive=True)
+
+        n_rows = np.sum([len(doc)**2 for doc in docs]) 
+        n_cols = self.max_sent_len * self.window_size
+        s_max = self.max_sent_len
         
-        IX_neg = self._index_docs2windows(index_docs, self.window_size, 
-            self.max_sent_len, positive=False)
-       
-        y = np.zeros((IX_pos.shape[0] * 2), dtype=np.int32)
-        y[:IX_pos.shape[0]] = 1
+        start_sym = self.embedding.get_index("__START__")
+        stop_sym = self.embedding.get_index("__STOP__")
+        pad = self.embedding.get_index("__PAD__")
+        
+        X_iw = np.ones((n_rows, n_cols), dtype=np.int32)
 
-        X = np.vstack([IX_pos, IX_neg])
+        #start_sent = [start,] + [pad] * (s_max - 1)        
+        #stop_sent = [stop,] + [pad] * (s_max - 1)        
+        
+        half_win = self.window_size / 2
+        y = []
+        row_index = 0
+        for doc in docs:
+            n_sents = len(doc)
+            #print n_sents
+            for i in xrange(n_sents):
+                for j in xrange(n_sents):
+                    if i == j:
+                        y.append(1)
+                    else:
+                        y.append(0)
+                    #print i, j
+                    #if j - half_win < 0:
+                    k = i - half_win
+                    
+                    s_idx = 0
+                    while k <= i + half_win:
+                     #   print "\t" + str(k)
+                        if k < 0:
+                            X_iw[row_index, 0] = start_sym
+                        elif k >= len(doc): 
+                            X_iw[row_index, 0] = stop_sym
+                        elif k == i:
+                            row_vec = self.embedding.get_indices(doc[j])
+                            start = s_idx * s_max
+                            stop = start + len(row_vec)
+                            X_iw[row_index,start:stop] = row_vec
+                        else:
+                            row_vec = self.embedding.get_indices(doc[k])
+                            start = s_idx * s_max
+                            stop = start + len(row_vec)
+                            X_iw[row_index,start:stop] = row_vec
 
-        if shuffle is True:
-            rnd = range(IX_pos.shape[0] * 2)
-            np.random.shuffle(rnd)
-            X = X[rnd,:]
-            y = y[rnd]
-
-        return X, y
+                        k += 1
+                        s_idx += 1
+                    row_index += 1
+        assert row_index == n_rows
+        y = np.array(y, dtype=np.int32)
+        return X_iw, y
+        
+#        index_docs = self._docs2index_docs(docs, self.max_sent_len) 
+#        index_docs = [index_doc for index_doc in index_docs
+#                      if len(index_doc) - self.start_pads - self.stop_pads \
+#                          > self.window_size]
+#        IX_pos = self._index_docs2windows(index_docs, self.window_size, 
+#            self.max_sent_len, positive=True)
+#        
+#        IX_neg = self._index_docs2windows(index_docs, self.window_size, 
+#            self.max_sent_len, positive=False)
+#       
+#        y = np.zeros((IX_pos.shape[0] * 2), dtype=np.int32)
+#        y[:IX_pos.shape[0]] = 1
+#
+#        X = np.vstack([IX_pos, IX_neg])
+#
+#        if shuffle is True:
+#            rnd = range(IX_pos.shape[0] * 2)
+#            np.random.shuffle(rnd)
+#            X = X[rnd,:]
+#            y = y[rnd]
+#
+#        return X, y
 
     def _docs2index_docs(self, docs, max_sent_len, make_safe=False):
         
