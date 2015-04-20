@@ -29,15 +29,19 @@ def result2path(dir, result):
     return os.path.join(dir, fname)
 
 
-def main(output_model_dir, corpus, max_folds=10):
+def main(output_model_dir, corpus, clean=False, max_folds=10):
     
     C = [1., 2., 2.5, 10., 100., 500., 1000.]
 
-    print C
-    D_P_train = cohere.data.get_barzilay_clean_docs_perms(
-        corpus=corpus, part="train") + \
-        cohere.data.get_barzilay_clean_docs_perms(
-            corpus=corpus, part="dev", tokens_only=False)
+    D_P_train = cohere.data.get_barzilay_data(
+        corpus=corpus, part="train", format="document", clean=clean)
+    D_P_train = [inst for inst in D_P_train if len(inst[u"gold"]) >= 3]
+
+#    print C
+#    D_P_train = cohere.data.get_barzilay_clean_docs_perms(
+#        corpus=corpus, part="train") + \
+#        cohere.data.get_barzilay_clean_docs_perms(
+#            corpus=corpus, part="dev", tokens_only=False)
     
     transformer = eg.EntityGridTransformer()
     E_P_train = transformer.transform_D_P(D_P_train)
@@ -98,8 +102,13 @@ def main(output_model_dir, corpus, max_folds=10):
     b_avg = b_sum / float(max_folds)
     
     print "Loading test data"
-    D_P_test = cohere.data.get_barzilay_clean_docs_perms(
-        corpus=corpus, part="test")
+   # D_P_test = cohere.data.get_barzilay_clean_docs_perms(
+   #     corpus=corpus, part="test")
+
+    D_P_test = cohere.data.get_barzilay_data(
+        corpus=corpus, part="test", format="document", clean=clean)
+    D_P_test = [inst for inst in D_P_test if len(inst[u"gold"]) >= 3]
+
     E_P_test = transformer.transform_D_P(D_P_test)
     X_test, y_test = vec.pairwise_transform(E_P_test)
     scores = np.dot(X_test, thetas_avg.T) + b_avg
@@ -110,7 +119,7 @@ def main(output_model_dir, corpus, max_folds=10):
 
 if __name__ ==  u"__main__":
     args = sys.argv
-    assert len(args) == 2
+    assert len(args) >= 2
     assert args[1] in ["ntsb", "apws"]
     if args[1] == "ntsb": 
         output_dir = os.path.join(
@@ -122,5 +131,8 @@ if __name__ ==  u"__main__":
             os.getenv("COHERENCE_DATA", "data"), "models", "apws.egrid")
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-
-    main(output_dir, args[1])
+    if len(args) == 3 and args[2] == "clean":
+        clean = True
+    else:
+        clean = False
+    main(output_dir, args[1], clean=clean)
