@@ -7,7 +7,6 @@ from itertools import izip
 class WordEmbeddings(object):
     def __init__(self, token2index, embeddings):
         self.vocab = token2index.keys()
-        self.vocab.sort(key=lambda x: token2index[x])
         self.vocab_size = embeddings.shape[0]
         self.embed_dim = embeddings.shape[1]
         self.token2index = token2index
@@ -15,26 +14,69 @@ class WordEmbeddings(object):
         self.W = embeddings
         assert len(self.vocab) == embeddings.shape[0]
 
-    def __contains__(self, token):
-        return token in self.token2index
+    @staticmethod
+    def from_file(path, dtype=np.float64):
+        if not os.path.exists(path):
+            raise Exception("{} does not exist!".format(path))
 
-    def get_index(self, token):
-        if token not in self.token2index:
-            token = u"__UNKNOWN__"
-        return self.token2index[token]
+        # Read in embeddings and map tokens to indices in the embedding 
+        # matrix.
+        embed = []
+        current_index = 0
+        token2index = {}
+        with gzip.open(path, u"r") as f:
+            for line in f:
+                line = line.strip().split(" ")
+                word = line.pop(0).decode(u"utf-8")
+                embed.append([float(x) for x in line])
+                token2index[word] = current_index
+                current_index += 1
+        embed = np.array(embed, dtype=dtype)
+        return WordEmbeddings(token2index, embed)
 
-    def get_indices(self, tokens):
-        return [self.get_index(token) for token in tokens]
+    def __str__(self):
+        return unicode(self)
 
-    def get_embedding(self, token):
-        if token not in self.token2index:
-            raise Exception("Bad index")
-        index = self.token2index[token]
-        return self.W[index,:]
+    def __unicode__(self):
+        return u"WordEmbeddings shape {}, dtype {}".format(
+            self.W.shape, self.W.dtype)
 
-    def get_words(self, indices):
-        return [self.index2token.get(index, "__UNKNOWN__") 
-                for index in indices]
+    def indices(self, words):
+        if isinstance(words, str):
+            return self.token2index[words.encode(u"utf-8")]
+        elif isinstance(words, unicode):
+            return self.token2index[words]
+        elif isinstance(words, list) or isinstance(words, tuple):
+            unicodes = [w if isinstance(w, unicode) else w.decode(u"utf-8")
+                        for w in words]
+            return [self.token2index[u] for u in unicodes]
+        else:
+            raise Exception(u"{} is not a valid type!".format(type(words)))
+
+    def __getitem__(self, obj):
+        return self.W[obj]
+            
+
+#    def __contains__(self, token):
+#        return token in self.token2index
+#
+#    def get_index(self, token):
+#        if token not in self.token2index:
+#            token = u"__UNKNOWN__"
+#        return self.token2index[token]
+#
+#    def get_indices(self, tokens):
+#        return [self.get_index(token) for token in tokens]
+#
+#    def get_embedding(self, token):
+#        if token not in self.token2index:
+#            raise Exception("Bad index")
+#        index = self.token2index[token]
+#        return self.W[index,:]
+#
+#    def get_words(self, indices):
+#        return [self.index2token.get(index, "__UNKNOWN__") 
+#                for index in indices]
 
 
 class SennaEmbeddings(WordEmbeddings):
@@ -473,5 +515,6 @@ class IndexDocTransformer(object):
     def inverse_transform(self, IX):
         return np.array(
             [self.embedding.get_words(ix) for ix in IX], dtype=object)
+
 
 
