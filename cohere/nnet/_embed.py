@@ -2,11 +2,11 @@
 import os
 import gzip
 import numpy as np
+from itertools import izip
 
 class WordEmbeddings(object):
     def __init__(self, token2index, embeddings):
         self.vocab = token2index.keys()
-        self.vocab.sort(key=lambda x: token2index[x])
         self.vocab_size = embeddings.shape[0]
         self.embed_dim = embeddings.shape[1]
         self.token2index = token2index
@@ -14,26 +14,69 @@ class WordEmbeddings(object):
         self.W = embeddings
         assert len(self.vocab) == embeddings.shape[0]
 
-    def __contains__(self, token):
-        return token in self.token2index
+    @staticmethod
+    def from_file(path, dtype=np.float64):
+        if not os.path.exists(path):
+            raise Exception("{} does not exist!".format(path))
 
-    def get_index(self, token):
-        if token not in self.token2index:
-            token = u"__UNKNOWN__"
-        return self.token2index[token]
+        # Read in embeddings and map tokens to indices in the embedding 
+        # matrix.
+        embed = []
+        current_index = 0
+        token2index = {}
+        with gzip.open(path, u"r") as f:
+            for line in f:
+                line = line.strip().split(" ")
+                word = line.pop(0).decode(u"utf-8")
+                embed.append([float(x) for x in line])
+                token2index[word] = current_index
+                current_index += 1
+        embed = np.array(embed, dtype=dtype)
+        return WordEmbeddings(token2index, embed)
 
-    def get_indices(self, tokens):
-        return [self.get_index(token) for token in tokens]
+    def __str__(self):
+        return unicode(self)
 
-    def get_embedding(self, token):
-        if token not in self.token2index:
-            raise Exception("Bad index")
-        index = self.token2index[token]
-        return self.W[index,:]
+    def __unicode__(self):
+        return u"WordEmbeddings shape {}, dtype {}".format(
+            self.W.shape, self.W.dtype)
 
-    def get_words(self, indices):
-        return [self.index2token.get(index, "__UNKNOWN__") 
-                for index in indices]
+    def indices(self, words):
+        if isinstance(words, str):
+            return self.token2index[words.encode(u"utf-8")]
+        elif isinstance(words, unicode):
+            return self.token2index[words]
+        elif isinstance(words, list) or isinstance(words, tuple):
+            unicodes = [w if isinstance(w, unicode) else w.decode(u"utf-8")
+                        for w in words]
+            return [self.token2index[u] for u in unicodes]
+        else:
+            raise Exception(u"{} is not a valid type!".format(type(words)))
+
+    def __getitem__(self, obj):
+        return self.W[obj]
+            
+
+#    def __contains__(self, token):
+#        return token in self.token2index
+#
+#    def get_index(self, token):
+#        if token not in self.token2index:
+#            token = u"__UNKNOWN__"
+#        return self.token2index[token]
+#
+#    def get_indices(self, tokens):
+#        return [self.get_index(token) for token in tokens]
+#
+#    def get_embedding(self, token):
+#        if token not in self.token2index:
+#            raise Exception("Bad index")
+#        index = self.token2index[token]
+#        return self.W[index,:]
+#
+#    def get_words(self, indices):
+#        return [self.index2token.get(index, "__UNKNOWN__") 
+#                for index in indices]
 
 
 class SennaEmbeddings(WordEmbeddings):
@@ -115,17 +158,19 @@ class BorrowingWordEmbeddings(WordEmbeddings):
                 #    return v
             new_vector_func = nvf
 
-        new_vocab.add("__START__")
-        new_vocab.add("__STOP__")
-        new_vocab.add("__UNKNOWN__")
-        new_vocab.add("__PAD__")
         new_vocab = list(new_vocab)
         new_vocab.sort()
+        new_vocab.append("__UNKNOWN__")
+        new_vocab.append("__PAD__")
+
+        self.special_token_start_index = len(new_vocab)
+        new_vocab.append("__START__")        
+        new_vocab.append("__STOP__")
         vocab_size = len(new_vocab)
         token2index = {}
 
         embed = []
-        for token, index in zip(new_vocab, xrange(vocab_size)):
+        for token, index in izip(new_vocab, xrange(vocab_size)):
             token2index[token] = index
             if token in bootstrap_embedding:
                 embed.append(bootstrap_embedding.get_embedding(token))
@@ -262,28 +307,84 @@ class IndexDocTransformer(object):
         assert len(IX_gold) == len(IX_perm)
         return IX_gold, IX_perm
 
-    def transform(self, docs):
-        index_docs = self._docs2index_docs(docs, self.max_sent_len) 
-        index_docs = [index_doc for index_doc in index_docs
-                      if len(index_doc) - self.start_pads - self.stop_pads \
-                          > self.window_size]
-        IX_pos = self._index_docs2windows(index_docs, self.window_size, 
-            self.max_sent_len, positive=True)
+    def transform(self, docs, shuffle=True):
+
+        n_rows = np.sum([len(doc)**2 for doc in docs]) 
+        n_cols = self.max_sent_len * self.window_size
+        s_max = self.max_sent_len
         
-        IX_neg = self._index_docs2windows(index_docs, self.window_size, 
-            self.max_sent_len, positive=False)
-       
-        y = np.zeros((IX_pos.shape[0] * 2), dtype=np.int32)
-        y[:IX_pos.shape[0]] = 1
+        start_sym = self.embedding.get_index("__START__")
+        stop_sym = self.embedding.get_index("__STOP__")
+        pad = self.embedding.get_index("__PAD__")
+        
+        X_iw = np.ones((n_rows, n_cols), dtype=np.int32)
 
-        X = np.vstack([IX_pos, IX_neg])
+        #start_sent = [start,] + [pad] * (s_max - 1)        
+        #stop_sent = [stop,] + [pad] * (s_max - 1)        
+        
+        half_win = self.window_size / 2
+        y = []
+        row_index = 0
+        for doc in docs:
+            n_sents = len(doc)
+            #print n_sents
+            for i in xrange(n_sents):
+                for j in xrange(n_sents):
+                    if i == j:
+                        y.append(1)
+                    else:
+                        y.append(0)
+                    #print i, j
+                    #if j - half_win < 0:
+                    k = i - half_win
+                    
+                    s_idx = 0
+                    while k <= i + half_win:
+                     #   print "\t" + str(k)
+                        if k < 0:
+                            X_iw[row_index, 0] = start_sym
+                        elif k >= len(doc): 
+                            X_iw[row_index, 0] = stop_sym
+                        elif k == i:
+                            row_vec = self.embedding.get_indices(doc[j])
+                            start = s_idx * s_max
+                            stop = start + len(row_vec)
+                            X_iw[row_index,start:stop] = row_vec
+                        else:
+                            row_vec = self.embedding.get_indices(doc[k])
+                            start = s_idx * s_max
+                            stop = start + len(row_vec)
+                            X_iw[row_index,start:stop] = row_vec
 
-        rnd = range(IX_pos.shape[0] * 2)
-        np.random.shuffle(rnd)
-        X = X[rnd,:]
-        y = y[rnd]
-
-        return X, y
+                        k += 1
+                        s_idx += 1
+                    row_index += 1
+        assert row_index == n_rows
+        y = np.array(y, dtype=np.int32)
+        return X_iw, y
+        
+#        index_docs = self._docs2index_docs(docs, self.max_sent_len) 
+#        index_docs = [index_doc for index_doc in index_docs
+#                      if len(index_doc) - self.start_pads - self.stop_pads \
+#                          > self.window_size]
+#        IX_pos = self._index_docs2windows(index_docs, self.window_size, 
+#            self.max_sent_len, positive=True)
+#        
+#        IX_neg = self._index_docs2windows(index_docs, self.window_size, 
+#            self.max_sent_len, positive=False)
+#       
+#        y = np.zeros((IX_pos.shape[0] * 2), dtype=np.int32)
+#        y[:IX_pos.shape[0]] = 1
+#
+#        X = np.vstack([IX_pos, IX_neg])
+#
+#        if shuffle is True:
+#            rnd = range(IX_pos.shape[0] * 2)
+#            np.random.shuffle(rnd)
+#            X = X[rnd,:]
+#            y = y[rnd]
+#
+#        return X, y
 
     def _docs2index_docs(self, docs, max_sent_len, make_safe=False):
         
@@ -414,5 +515,6 @@ class IndexDocTransformer(object):
     def inverse_transform(self, IX):
         return np.array(
             [self.embedding.get_words(ix) for ix in IX], dtype=object)
+
 
 
