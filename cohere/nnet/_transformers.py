@@ -1,5 +1,172 @@
 from nltk.tree import Tree
 import numpy as np
+from sklearn.base import BaseEstimator
+
+
+class TokensTransformer(BaseEstimator):
+    def __init__(self, embeddings, window_size=3, max_sent_len=150):
+        self.embeddings = embeddings
+        self.window_size = window_size
+        self.max_sent_len = max_sent_len
+
+
+    @classmethod        
+    def get_max_sent_len(self, docs):
+        docs = self._make_docs_safe(docs)
+
+        max_sent = 0
+        for doc in docs:
+            for sent in doc:
+                max_sent = max(max_sent, len(sent))
+        return max_sent
+    
+    @classmethod
+    def _make_docs_safe(self, docs):
+        assert isinstance(docs, list) or isinstance(docs, tuple)
+        assert len(docs) > 0
+        if not (isinstance(docs[0], list) or isinstance(docs[0], tuple)):
+            docs = [docs]
+        return docs
+
+    def transform(self, docs):
+        docs = self._make_docs_safe(docs)
+
+        n_sents = np.sum([len(doc) for doc in docs])
+        pad_sym = -1 #self.embeddings.get_index("__PAD__")
+        X_idx_sent = pad_sym * np.ones(
+            (n_sents, self.max_sent_len), dtype=np.int64)
+        row_offset = 0
+        for doc in docs:
+            self._transform_single_doc(X_idx_sent, row_offset, doc)
+            row_offset += len(doc)
+        return X_idx_sent
+
+    def _transform_single_doc(self, X, row_offset, doc):
+        as_indices = [self.embeddings.indices(tokens) for tokens in doc]
+        for i, indices in enumerate(as_indices):
+            X[row_offset + i, 0 : len(indices)] = indices
+
+
+    def inverse_transform(self, X):
+        if len(X.shape) == 1:
+            X = X.reshape((1, X.shape[0]))
+        return [[self.embeddings.index2token[x_i] for x_i in x if x_i != -1]
+                for x in X]
+
+    def window_transform(self, docs):
+        docs = self._make_docs_safe(docs)
+         
+        pad_size = self.window_size / 2
+
+        max_toks = self.max_sent_len
+        pad_sym = -1 
+
+        n_rows = np.sum([len(doc) for doc in docs])
+        X_iw = np.ones((n_rows, self.max_sent_len * self.window_size), 
+                       dtype=np.int32) * pad_sym
+
+        # Transform doc to word index sentence matrix.
+        X_is  = self.transform(docs)
+
+        row_offset = 0
+        for idx, doc in enumerate(docs):
+            doc_len = len(doc)
+            X_is_doc = X_is[row_offset : row_offset + doc_len]
+            for i in xrange(0, doc_len):
+                for pos, k in enumerate(xrange(i-pad_size, i + pad_size + 1)):
+                    if k < 0:
+                        pass
+                    elif k >= doc_len:
+                        pass
+                    else:
+                        X_iw[row_offset + i, 
+                             pos * max_toks : (pos+1) * max_toks] = X_is_doc[k]
+                    
+            row_offset += doc_len
+        return X_iw
+
+
+    def training_window_transform(self, docs):
+        docs = self._make_docs_safe(docs)
+        
+        pad_size = self.window_size / 2
+        max_toks = self.max_sent_len
+        pad_sym = -1 
+
+        n_rows = np.sum([len(doc) * len(doc) for doc in docs])
+        X_iw = np.ones((n_rows, self.max_sent_len * self.window_size), 
+                       dtype=np.int32) * pad_sym
+        y = np.zeros((n_rows,), dtype=np.int32)
+
+        # Transform doc to word index sentence matrix and operation sentence
+        # matrix.
+        X_is = self.transform(docs)
+
+        row_offset = 0
+        input_row_offset = 0
+        for idx, doc in enumerate(docs):
+            doc_len = len(doc)
+            X_is_doc = X_is[input_row_offset : input_row_offset + doc_len]
+            for i in xrange(0, doc_len):
+                for j in xrange(0, doc_len):
+                    if i == j:
+                        y[row_offset + i * doc_len + j] = 1
+                    for pos, k in enumerate(xrange(i-pad_size, i+pad_size+1)):
+                        if k < 0:
+                            pass
+                            #X_iw[row_offset + i, pos * max_toks] = start_sym
+                        elif k >= doc_len:
+                            pass
+                            #X_iw[row_offset + i, pos * max_toks] = stop_sym
+                        else:
+                            if pos == pad_size:
+                                # selecting the focus which is j.
+                                l = j
+                            else:
+                                # select the left or right sentences (k).
+                                l = k
+                            X_iw[row_offset + i * doc_len + j, 
+                                 pos * max_toks:(pos+1)*max_toks] = X_is_doc[l]
+                    
+            row_offset += doc_len * doc_len
+            input_row_offset += doc_len
+        return X_iw, y
+
+    def pprint_token_index_sequences(self, X_is, cutoff=20):
+        if len(X_is.shape) == 1:
+            X_is = X_is.reshape((1, X_is.shape[0]))
+        for row, x_is in enumerate(X_is):
+            words = []
+            budget = 0
+            for i in xrange(self.max_sent_len):
+                if x_is[i] == -1:
+                    continue
+                else:
+                    w = self.embeddings.index2token[x_is[i]]
+                    words.append(w)
+             
+            print u"{}] ".format(row) + u" ".join(words)[:cutoff]
+
+    def pprint_token_index_windows(self, X_iw, cutoff=5):
+        max_sent = X_iw.shape[1] / self.window_size
+        s_len = min(cutoff, max_sent)
+        pad = -1
+        for row, x_iw in enumerate(X_iw):
+            sents = []
+            for k in xrange(self.window_size):
+                words = []
+                for i in xrange(k * max_sent, k * max_sent + s_len):
+                    if x_iw[i] == pad:
+                        continue
+                        #words.append(u"__PAD__")
+                    else:
+                        w = self.embeddings.index2token.get(
+                            x_iw[i], u"__UNKNOWN__")
+                        words.append(w)
+                sents.append(u" ".join(words))
+            print u"{}] ".format(row) + u" ... ".join(sents)
+
+
 
 class TreeTransformer(object):
     def __init__(self, embeddings, window_size=3, max_sent_len=120, 
