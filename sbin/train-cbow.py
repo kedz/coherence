@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import sys
 import os
-from cohere.models import CBOWModel
+
+from cohere.nnet import TokensTransformer, WordEmbeddings, CBOWModel
+#from cohere.nnet import CBOWModel
 import cohere.data
-import cohere.embed 
+#import cohere.embed 
 import numpy as np
-from sklearn.externals import joblib
+#from sklearn.externals import joblib
 from itertools import product
 from sklearn.cross_validation import KFold
 import pandas as pd
@@ -39,33 +41,67 @@ def result2path(dir, result):
         int(result["batch"]))
     return os.path.join(dir, fname)
 
-def main(output_model_dir, corpus):
+def main(output_model_dir, corpus, clean):
+    print "clean?", clean   
+    print "Loading training data..."
+    D_P = cohere.data.get_barzilay_data(
+        corpus=corpus, part="train", format="tokens", clean=clean, 
+        convert_brackets=False)
     
-    docs_perms = cohere.data.get_barzilay_clean_docs_perms(
-        corpus=corpus, part="train", tokens_only=True) + \
-        cohere.data.get_barzilay_clean_docs_perms(
-            corpus=corpus, part="dev", tokens_only=True)
-    docs = [dp["gold"] for dp in docs_perms]
+    D = [dp["gold"] for dp in D_P]
 
-    docs_perms_test = cohere.data.get_barzilay_clean_docs_perms(
-        corpus=corpus, part="test", tokens_only=True)
+    embed_path = os.path.join(
+        os.getenv("COHERENCE_DATA", "data"), 
+        "{}_embeddings.txt.gz".format(corpus))
+    print "Reading word embeddings from {} ...".format(embed_path)
+    embed = WordEmbeddings.from_file(embed_path)
+    
+    max_sent_len = TokensTransformer.get_max_sent_len(D)
 
-    vocab = make_vocab(docs)
-    senna = cohere.embed.SennaEmbeddings()
-    embed = cohere.embed.BorrowingWordEmbeddings(vocab, senna)
+#transformer = TokensTransformer(embed, 
+#        window_size=3, max_sent_len=max_sent_len)
+#    print max_sent_len
+
+    for doc in D:
+        for sent in doc:
+            #print u' '.join(t for t in sent)
+            for t in sent:
+                if t not in embed.token2index:
+                    print t
+        #print "\n"
+
+#    X = transformer.transform(D_train)
+#    X_iw, y = transformer.training_window_transform(D_train)
+
+#for x in transformer.inverse_transform(X):
+     #   print u' '.join(x)
+    #print transformer.pprint_token_index_windows(X_iw)
+    #print embed.W[X_iw].shape
+    #print np.all(-1 == X_iw, axis = 1)
+    #print np.sum(embed.W[X_iw], axis=1).shape
+
+#    model = CBOWModel(embed, max_sent_len=max_sent_len, window_size=3)
+#    print model.params["E"].eval().shape
+#    print model._funcs["H_s"](X_iw)
+#    import sys
+#    sys.exit()
+
+    #vocab = make_vocab(D_train)
+    #senna = cohere.embed.SennaEmbeddings()
+    #embed = cohere.embed.BorrowingWordEmbeddings(vocab, senna)
 
     results = []
 
-    max_sent_len = 115
-    n_data = len(docs)
+    #max_sent_len = 115
+    n_data = len(D)
 
     max_folds = 10
-    max_iters = 30
-    learning_rates = [0.01, 0.05, 0.075, .1]
+    max_iters = 10
+    learning_rates = [0.01,]
 
-    batch_sizes = [20,  25, 30, 50, 100]
-    window_sizes = [3, 5, 7]
-    lambdas = [0, 0.01, 0.1, 0.25, 0.5, 1.0, 1.25, 2.0, 2.5, 5.0]
+    batch_sizes = [25, ]
+    window_sizes = [7,] # [3, 5, 7]
+    lambdas = [0.01] #  [0, 0.01, 0.1, 0.25, 0.5, 1.0, 1.25, 2.0, 2.5, 5.0]
 
     n_settings = len(batch_sizes) * len(window_sizes) * len(lambdas) * \
         len(learning_rates)
@@ -77,29 +113,41 @@ def main(output_model_dir, corpus):
         print "lambda:", lam, "window size:", win_size,
         print "batch size:", batch_size, "lr:", lr
 
-        transformer = cohere.embed.IndexDocTransformer(
-            embed, start_pads=1, stop_pads=1,
-            max_sent_len=max_sent_len, window_size=win_size)
+
+        
+        transformer = TokensTransformer(
+            embed, max_sent_len=max_sent_len, window_size=win_size)
 
         folds = KFold(n_data, n_folds=max_folds)
         for n_fold, (I_train, I_dev) in enumerate(folds, 1):
-            docs_train = [docs[i] for i in I_train]
-            docs_dev = [docs[i] for i in I_dev]
-            docs_perms_dev = [docs_perms[i] for i in I_dev]
-            X_iw_train, y_train = transformer.transform(docs_train)
-            X_iw_dev, y_dev = transformer.transform(docs_dev)
-            X_gold, X_perm = transformer.transform_test(
-                docs_perms_dev)
+            D_train = [D[i] for i in I_train]
+            D_P_dev = [D_P[i] for i in I_dev]
+            
+            X_iw_gold = []
+            X_iw_perm = []
+            for d_P in D_P_dev:
+                x_iw_gold = transformer.window_transform([d_P[u"gold"]])
+                for p in d_P[u"perms"]:
+                    x_iw_perm =transformer.window_transform([p])
+                    X_iw_gold.append(x_iw_gold)
+                    X_iw_perm.append(x_iw_perm)
+            #docs_perms_dev = [docs_perms[i] for i in I_dev]
+            X_iw, y = transformer.training_window_transform(D_train)
+            #X_iw_dev, y_dev = transformer.transform(docs_dev)
+            #X_gold, X_perm = transformer.transform_test(
+            #    docs_perms_dev)
 
-            def fit_callback(nnet, avg_win_err, n_iter):
+            def fit_callback(nnet, n_iter):
                 #fname = template.format(
                 #    n_setting, n_fold, n_iter, learning_rate, 
                 #    win_size, lam, batch_size)
                 #print "writing to {} ...".format(pkl_path)
                 #with open(pkl_path, "w") as f:
                 #    pickle.dump(nnet, f)
-                dev_avg_win_err = nnet.avg_win_err(X_iw_dev, y_dev)
-                dev_acc = nnet.score(X_gold, X_perm)
+                #dev_avg_win_err = nnet.avg_win_err(X_iw_dev, y_dev)
+                avg_win_err = -1.
+                dev_avg_win_err = -1.
+                dev_acc = nnet.score(X_iw_gold, X_iw_perm)
                 result = {"fold": n_fold, "model no.": n_setting,
                           "iter": n_iter,
                           "train err": avg_win_err,
@@ -118,12 +166,12 @@ def main(output_model_dir, corpus):
                 print " | dev acc: {0:.3f}".format(dev_acc)
                 results.append(result)
 
-            nnet = CBOWModel(embeddings=embed, max_sent_len=max_sent_len, 
-                learning_rate=lr,
+            nnet = CBOWModel(embed, max_sent_len=max_sent_len, 
+                alpha=lr,
                 batch_size=batch_size, lam=lam, window_size=win_size,
                 max_iters=max_iters, fit_callback=fit_callback)
 
-            nnet.fit(X_iw_train, y_train)
+            nnet.fit(X_iw, y)
 
         print "TOP 5"
         df = make_df(results)
@@ -139,24 +187,33 @@ def main(output_model_dir, corpus):
     thetas_avg = thetas_sum / float(max_folds)
     nnet.theta.set_value(thetas_avg)
 
-    transformer = cohere.embed.IndexDocTransformer(
-        embed, start_pads=1, stop_pads=1,
+    transformer = TokensTransformer(
+        embed,
         max_sent_len=max_sent_len, window_size=int(best_params["win"]))
-    X_gold, X_perm = transformer.transform_test(
-        docs_perms_test)
-    test_acc = nnet.score(X_gold, X_perm)
+    D_P_test = cohere.data.get_barzilay_data(
+        corpus=corpus, part="test", format="tokens", clean=clean, 
+        convert_brackets=False)
+    X_iw_gold = []
+    X_iw_perm = []
+    for d_P in D_P_test:
+        x_iw_gold = transformer.window_transform([d_P[u"gold"]])
+        for p in d_P[u"perms"]:
+            x_iw_perm =transformer.window_transform([p])
+            X_iw_gold.append(x_iw_gold)
+            X_iw_perm.append(x_iw_perm)
+
+    #X_gold, X_perm = transformer.transform_test(
+    #    docs_perms_test)
+    test_acc = nnet.score(X_iw_gold, X_iw_perm)
     print "Best Model"
     print df.tail(1)
     with open(os.path.join(output_model_dir, "results.csv"), "w") as f:
         df.to_csv(f)
     print "Test Acc", test_acc
-    for docs_perms in docs_perms_test:
-        if len(docs_perms["gold"]) > max_sent_len:
-            print len(docs_perms["gold"])
 
 if __name__ ==  u"__main__":
     args = sys.argv
-    assert len(args) == 2
+    assert len(args) >= 2
     assert args[1] in ["ntsb", "apws"]
     if args[1] == "ntsb": 
         output_dir = os.path.join(
@@ -168,5 +225,9 @@ if __name__ ==  u"__main__":
             os.getenv("COHERENCE_DATA", "data"), "models", "apws.cbow")
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+    if len(args) == 3 and args[2] == "clean":
+        clean = True
+    else:
+        clean = False
 
-    main(output_dir, args[1])
+    main(output_dir, args[1], clean)
