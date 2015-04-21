@@ -6,6 +6,7 @@ import numpy as np
 from itertools import product
 from sklearn.cross_validation import KFold
 import pandas as pd
+from itertools import izip
 
 def make_vocab(docs):
     vocab = set()
