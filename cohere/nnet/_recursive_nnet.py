@@ -1,52 +1,48 @@
 import theano
 import theano.tensor as T
 import numpy as np
-from itertools import izip
-import cPickle as pickle
-import os
-import datetime
-from sklearn.base import BaseEstimator
+#import cPickle as pickle
+#import os
+#import datetime
+from cohere.nnet._base import _BaseNNModel
 
-class RecursiveNNModel(object):
+
+
+class RecursiveNNModel(_BaseNNModel):
     def __init__(self, embeddings, max_sent_len=150, max_ops_len=40, 
                  window_size=3, hidden_dim=100, alpha=.01, lam=1.25,
                  batch_size=25, max_iters=10, 
                  fit_embeddings=False, fit_callback=None, 
                  update_method="adagrad", initializers=None):
          
-        if update_method not in ["sgd", "adagrad"]:
-            raise Exception(
-                "Invalid update method. Must be 'sgd' or 'adagrad'")
-
-        self.embeddings = embeddings
-        self.max_sent_len = max_sent_len
         self.max_ops_len = max_ops_len
-        self.window_size = window_size
-        self.hidden_dim = hidden_dim
-        self.alpha = alpha
-        self.lam = lam
-        self.batch_size = batch_size
-        self.max_iters = max_iters
-        self.fit_embeddings = fit_embeddings
-        self.fit_callback = fit_callback
-        self.update_method = update_method
 
         self.sym_vars = {u"X_iw": T.imatrix(name=u"X_iw"),
                          u"y": T.ivector(name=u"y"),
                          u"O_iw": T.tensor3(name=u"O_iw", dtype="int32")}
 
+        super(RecursiveNNModel, self).__init__(
+            embeddings, max_sent_len=max_sent_len, hidden_dim=hidden_dim,
+            window_size=window_size, alpha=alpha, lam=lam,
+            batch_size=batch_size, fit_embeddings=fit_embeddings, 
+            fit_callback=fit_callback, update_method=update_method,
+            initializers=initializers, max_iters=max_iters)
+       
 
-        if embeddings is not None:
-            self.init_params(self.embeddings, initializers)
-            self.build_network(
-                self.max_sent_len, self.max_ops_len, self.window_size)
+        #if embeddings is not None:
+        #    self.init_params(self.embeddings, initializers)
+        #    self.build_network(
+        #        self.max_sent_len, self.max_ops_len, self.window_size)
 
-    def init_params(self, embeddings, initializers=None):
+    def _init_params(self):
+        
+        embeddings = self.embeddings
+        initializers = self.initializers
+
         if initializers is None:
             initializers = dict()
 
         word_dim = embeddings.embed_dim
-        
 
         # params is a dict mapping variable name to theano Variable objects.
         self.params = {}
@@ -180,9 +176,8 @@ class RecursiveNNModel(object):
         inits.append(b1_init)
         current_pointer = next_pointer
     
-        # Init W2 (hidden_dim x 2)
+        # Init W2 (hidden_dim x 1)
         next_pointer = current_pointer + self.hidden_dim * 1
-        print "W2", (current_pointer, next_pointer)
         W2 = self.theta[current_pointer:next_pointer].reshape(
             (self.hidden_dim, 1))
         W2.name="W2"
@@ -269,7 +264,10 @@ class RecursiveNNModel(object):
                 name="grad_hist",
                 borrow=True)
 
-    def build_network(self, max_sent_len, max_ops_len, win_size):
+    def _build_network(self):
+        max_sent_len = self.max_sent_len
+        max_ops_len = self.max_ops_len
+        win_size = self.window_size
         
         # _funcs will contains compiled theano functions of several
         # variables for debugging purposes
@@ -340,6 +338,7 @@ class RecursiveNNModel(object):
             B_s = T.zeros_like(X[:max_sent_len])
 
             if i < cntr_idx:
+                print "left", i
                 B_s_slice = T.switch(
                     T.eq(X_iw[:, i * max_sent_len], -1).reshape(
                         (X.shape[1] ,1)),
@@ -351,6 +350,7 @@ class RecursiveNNModel(object):
 
             elif i > cntr_idx:
                 k = i - cntr_idx - 1
+                print "right", k
                 B_s_slice = T.switch(
                     T.eq(X_iw[:, i * max_sent_len], -1).reshape(
                         (X.shape[1] ,1)),
@@ -494,6 +494,18 @@ class RecursiveNNModel(object):
             print 
             if self.fit_callback is not None:
                 self.fit_callback(self, n_iter)
+
+    def score(self, X_gold, O_gold, X_perm, O_perm):
+        correct = 0
+        total = 0
+        for X_iw_gold, O_iw_gold, X_iw_perm, O_iw_perm in izip(
+                X_gold, O_gold, X_perm, O_perm):
+            gold_lp = self.log_prob_coherent(X_iw_gold, O_iw_gold)
+            perm_lp = self.log_prob_coherent(X_iw_perm, O_iw_perm)
+            if gold_lp > perm_lp:
+                correct += 1
+            total += 1
+        return float(correct) / max(total, 1)
 
 
     def dbg_print_window(self, X_iw):
