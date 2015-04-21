@@ -533,7 +533,8 @@ def get_barzilay_clean_docs_perms(corpus="ntsb", part="train",
     return docs_perms
 
 def get_barzilay_data(corpus=u"apws", part=u"train", 
-                      clean=False, format=u"document"):
+                      clean=False, format=u"document", include_perms=True,
+                      convert_brackets=False):
 
     assert format in [u"text", u"xml", u"document", u"tokens", u"trees"]
 
@@ -551,14 +552,14 @@ def get_barzilay_data(corpus=u"apws", part=u"train",
     path = os.path.join(os.getenv(u"COHERENCE_DATA", u"."), fname)
 
     def read_document(f):
-        return corenlp.read_xml(f)
+        return corenlp.read_xml(f, convert_brackets=convert_brackets)
     def read_tokens(f):
-        doc = corenlp.read_xml(f)
+        doc = corenlp.read_xml(f, convert_brackets=convert_brackets)
         return [[unicode(token).lower() for token in sent]
                 for sent in doc]
     def read_parse(f):
-        doc = corenlp.read_xml(f)
-        return doc.parse
+        doc = corenlp.read_xml(f, convert_brackets=convert_brackets)
+        return [sent.parse for sent in doc]
 
     if format == u"text" or format == u"xml":
         reader = None
@@ -572,8 +573,12 @@ def get_barzilay_data(corpus=u"apws", part=u"train",
     data = read_tar(
         path, text_filter=reader, file_ext=".xml", no_perm_num=True)
     data = data[key_name]
-    return [instance for name, instance
-            in sorted(data.items(), key=lambda x: x[0])]
+    if include_perms is True:
+        return [instance for name, instance
+                in sorted(data.items(), key=lambda x: x[0])]
+    else:
+        return [instance[u"gold"] for name, instance
+                in sorted(data.items(), key=lambda x: x[0])]
 
 def extract_barzilay_tar(path_or_url, text_filter=None):
 
