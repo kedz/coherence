@@ -5,6 +5,7 @@ import numpy as np
 #import os
 #import datetime
 from cohere.nnet._base import _BaseNNModel
+from itertools import izip
 
 
 
@@ -342,7 +343,7 @@ class RecursiveNNModel(_BaseNNModel):
                 B_s_slice = T.switch(
                     T.eq(X_iw[:, i * max_sent_len], -1).reshape(
                         (X.shape[1] ,1)),
-                    T.alloc(self.params["W_start"][i],(X.shape[1],1)),
+                    T.alloc(self.params["W_start"][i],X.shape[1]),
                     X[i * max_sent_len,:])
                 B_s = T.set_subtensor(
                     B_s[:,:],
@@ -354,7 +355,7 @@ class RecursiveNNModel(_BaseNNModel):
                 B_s_slice = T.switch(
                     T.eq(X_iw[:, i * max_sent_len], -1).reshape(
                         (X.shape[1] ,1)),
-                    T.alloc(self.params["W_stop"][k],(X.shape[1],1)),
+                    T.alloc(self.params["W_stop"][k],X.shape[1]),
                     X[i * max_sent_len,:])
                 B_s = T.set_subtensor(
                     B_s[:,:],
