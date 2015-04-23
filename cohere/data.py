@@ -9,6 +9,7 @@ import cPickle as pickle
 import random
 import re
 import urllib2
+import gensim
 
 def remove_apws_meta(f):
     clean_text = []
@@ -763,6 +764,29 @@ def make_xml(text_tgz, xml_tgz, mem=u'7G', n_procs=4):
 
     write_tar(xml_tgz, xml_data, file_ext=".xml")
 
+def make_word_embeddings(path, corpus, clean):
+    docs_train = get_barzilay_data(corpus=corpus, part=u"train", 
+                                   clean=clean, format=u"tokens", 
+                                   include_perms=False, convert_brackets=False)
+    
+    docs_test = get_barzilay_data(corpus=corpus, part=u"test", 
+                                  clean=clean, format=u"tokens", 
+                                  include_perms=False, convert_brackets=False)
+    S = []
+    for doc in docs_train:
+        for sent in doc:
+            S.append(sent)
+    for doc in docs_test:
+        for sent in doc:
+            S.append(sent)
+    model = gensim.models.Word2Vec(S, size=50, min_count=1, workers=16,
+                                   iter=100)
+    with gzip.open(path, "w") as f:
+        for word in model.vocab.keys():
+            word_str = word.encode(u'utf-8')
+            f.write(' '.join([word_str] + [str(x) for x in model[word]]))
+            f.write('\n')
+
 def main(n_procs=2):
 
     apws_url_train = \
@@ -808,6 +832,16 @@ def main(n_procs=2):
         data_dir, "clean_apws_test_xml.tar.gz")
     has_clean_apws_test_xml = os.path.exists(clean_apws_test_xml_tgz)
 
+    ### Embeddings path
+    apws_embeddings = os.path.join(
+        data_dir, "apws_embeddings.txt.gz")
+    has_apws_embeddings = os.path.exists(apws_embeddings)
+
+    clean_apws_embeddings = os.path.join(
+        data_dir, "clean_apws_embeddings.txt.gz")
+    has_clean_apws_embeddings = os.path.exists(clean_apws_embeddings)
+
+    ### Print status. ###
     print "[{}] Barzilay&Lapata APWS train txt".format(
         "X" if has_apws_train else " ")
     print "[{}] Barzilay&Lapata APWS test txt".format(
@@ -827,6 +861,12 @@ def main(n_procs=2):
         "X" if has_clean_apws_train_xml else " ")
     print "[{}] Clean APWS test xml".format(
         "X" if has_clean_apws_test_xml else " ")
+
+    print "[{}] APWS Embeddings".format(
+        "X" if has_apws_embeddings else " ")
+    
+    print "[{}] Clean APWS Embeddings".format(
+        "X" if has_clean_apws_embeddings else " ")
 
     if not has_apws_train:
         print "Downloading APWS training data"
@@ -881,8 +921,17 @@ def main(n_procs=2):
         make_xml(
             clean_apws_test_tgz, clean_apws_test_xml_tgz, n_procs=n_procs)
 
-
+    if not has_apws_embeddings:
+        print "Learning apws word embeddings"
+        print "to:\n\t {} ...".format(apws_embeddings) 
+        make_word_embeddings(apws_embeddings, "apws", False)
     
+    if not has_clean_apws_embeddings:
+        print "Learning clean apws word embeddings"
+        print "to:\n\t {} ...".format(clean_apws_embeddings) 
+        make_word_embeddings(clean_apws_embeddings, "apws", True)
+
+     
 
     #preprocess_barzilay_apws(u"data", "barzilay_apws")
 
