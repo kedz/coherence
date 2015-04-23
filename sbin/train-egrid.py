@@ -1,7 +1,7 @@
 import os
 import sys
 import cohere.data
-import cohere.models.entitygrid as eg
+import cohere.entitygrid as eg
 import numpy as np
 import sklearn.svm
 from sklearn.cross_validation import KFold
@@ -11,13 +11,11 @@ import pandas as pd
 
 def make_df(results):
     df = pd.DataFrame(results)
-    #df = df.set_index(["model no."])
     df2 = df.groupby(["model no."])
     df3 = df2[["train acc", "dev acc"]].mean()
     df3.columns = ["train acc", "dev acc"]
     df3[["c", "clean"]] = \
         df2[["c", "clean"]].first()
-    #df3 = df3.reset_index()
     df3.sort("dev acc", inplace=True)
     return df3
 
@@ -31,18 +29,14 @@ def result2path(dir, result):
 
 def main(output_model_dir, corpus, clean=False, max_folds=10):
     
-    C = [1., 2., 2.5, 10., 100., 500., 1000.]
+    C = [1., 2., 2.5, 10., 100., 150., 200., 250., 300., 350., 
+         400., 450., 500., 550., 600., 650., 700., 750., 800., 850.,
+         900., 950., 1000.]
 
     D_P_train = cohere.data.get_barzilay_data(
         corpus=corpus, part="train", format="document", clean=clean)
     D_P_train = [inst for inst in D_P_train if len(inst[u"gold"]) >= 3]
 
-#    print C
-#    D_P_train = cohere.data.get_barzilay_clean_docs_perms(
-#        corpus=corpus, part="train") + \
-#        cohere.data.get_barzilay_clean_docs_perms(
-#            corpus=corpus, part="dev", tokens_only=False)
-    
     transformer = eg.EntityGridTransformer()
     E_P_train = transformer.transform_D_P(D_P_train)
    
@@ -62,10 +56,13 @@ def main(output_model_dir, corpus, clean=False, max_folds=10):
             y_train = y[I_train]
             X_dev = X[I_dev, :]
             y_dev = y[I_dev] 
+
             clf = sklearn.svm.SVC(kernel='linear', C=c)
             clf.fit(X_train, y_train)
+            
             train_acc = clf.score(X_train, y_train)
             dev_acc = clf.score(X_dev, y_dev)
+            
             print "fold:", n_fold, "TRAIN ACC:", train_acc, 
             print "DEV ACC:", dev_acc
 
@@ -102,9 +99,6 @@ def main(output_model_dir, corpus, clean=False, max_folds=10):
     b_avg = b_sum / float(max_folds)
     
     print "Loading test data"
-   # D_P_test = cohere.data.get_barzilay_clean_docs_perms(
-   #     corpus=corpus, part="test")
-
     D_P_test = cohere.data.get_barzilay_data(
         corpus=corpus, part="test", format="document", clean=clean)
     D_P_test = [inst for inst in D_P_test if len(inst[u"gold"]) >= 3]
