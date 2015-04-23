@@ -220,12 +220,12 @@ if __name__ ==  u"__main__":
     assert args[1] in ["ntsb", "apws"]
     if args[1] == "ntsb": 
         output_dir = os.path.join(
-            os.getenv("COHERENCE_DATA", "data"), "models", "ntsb.cbow")
+            os.getenv("COHERENCE_DATA", "data"), "models", "ntsb.recursive")
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
     if args[1] == "apws": 
         output_dir = os.path.join(
-            os.getenv("COHERENCE_DATA", "data"), "models", "apws.cbow")
+            os.getenv("COHERENCE_DATA", "data"), "models", "apws.recursive")
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
     if len(args) == 3 and args[2] == "clean":

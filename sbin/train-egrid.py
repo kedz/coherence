@@ -15,17 +15,17 @@ def make_df(results):
     df2 = df.groupby(["model no."])
     df3 = df2[["train acc", "dev acc"]].mean()
     df3.columns = ["train acc", "dev acc"]
-    df3[["c"]] = \
-        df2[["c"]].first()
+    df3[["c", "clean"]] = \
+        df2[["c", "clean"]].first()
     #df3 = df3.reset_index()
     df3.sort("dev acc", inplace=True)
     return df3
 
 def result2path(dir, result):
-    template = "mdl_no.{}.fold.{}.c.{}.pkl"
+    template = "mdl_no.{}.fold.{}.c.{}{}.pkl"
     fname = template.format(
         int(result["model no."]), int(result["fold"]), 
-        float(result["c"]),)
+        float(result["c"]), ".clean" if result["clean"] else "")
     return os.path.join(dir, fname)
 
 
@@ -72,7 +72,7 @@ def main(output_model_dir, corpus, clean=False, max_folds=10):
             result = {"fold": n_fold, "model no.": n_setting,
                       "train acc": train_acc,
                       "dev acc": dev_acc,
-                      "c": c,
+                      "c": c, "clean": clean,
                      }
         
             pkl_path = result2path(output_model_dir, result)
