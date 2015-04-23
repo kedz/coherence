@@ -195,7 +195,7 @@ class RecursiveNNModel(_BaseNNModel):
         inits.append(W2_init)
         current_pointer = next_pointer
         
-        # Init b2 (2)
+        # Init b2 (1)
         next_pointer = current_pointer + 1    
         b2 = self.theta[current_pointer:next_pointer].reshape(
                 (1,))
