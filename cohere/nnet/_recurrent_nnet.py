@@ -374,7 +374,7 @@ class RecurrentNNModel(_BaseNNModel):
     def step_mask(self, x_t, m_t, h_tm1):
         h_t_unmasked = self.step(x_t, h_tm1)
         h_t = m_t * h_t_unmasked + (1 - m_t) * h_tm1
-        return h_t
+        return h_t, theano.scan_module.until(T.all(T.eq(m_t, 0)))
     
     def step(self, x_t, h_tm1):
         W_rec = self.params["W_rec"]

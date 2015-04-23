@@ -418,7 +418,7 @@ class RecursiveNNModel(_BaseNNModel):
         result = T.switch(T.eq(o_code, 1), B[0], h)
         B_tp1 = T.set_subtensor(B[o_idx, index], result)
 
-        return B_tp1
+        return B_tp1, theano.scan_module.until(T.all(T.eq(o_code, 1)))
 
     def log_prob_coherent(self, X_iw, O_iw):
         P = self._funcs["P(y=1|w)"](X_iw, O_iw)
