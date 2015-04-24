@@ -10,6 +10,35 @@ import random
 import re
 import urllib2
 import gensim
+import collections
+
+
+class CoherenceData(object):
+    def __init__(self, instances):
+        self.instances = instances
+        self.gold = [inst.gold for inst in instances]
+        self.perms = [inst.perms for inst in instances]
+        self.ids = [inst.id for inst in instances]
+
+    def __len__(self):
+        return len(self.instances)
+
+    def __getitem__(self, obj):
+        if isinstance(obj, collections.Iterable):
+            selection = [self.instances[i] for i in obj]
+        else:
+            selection = [self.instances[obj]]
+        return CoherenceData(selection)
+
+    def __iter__(self):
+        return iter(self.instances)        
+
+class CoherenceInstance(object):
+    def __init__(self, id, gold, perms):
+        self.id = id
+        self.gold = gold
+        self.perms = perms
+        self.num_perms = len(perms)
 
 def remove_apws_meta(f):
     clean_text = []
@@ -574,23 +603,33 @@ def get_barzilay_data(corpus=u"apws", part=u"train",
     data = read_tar(
         path, text_filter=reader, file_ext=".xml", no_perm_num=True)
     data = data[key_name]
-    if include_perms is True:
-        return [instance for name, instance
-                in sorted(data.items(), key=lambda x: x[0])]
-    else:
-        return [instance[u"gold"] for name, instance
-                in sorted(data.items(), key=lambda x: x[0])]
+
+    instances = []
+    for name, instance in sorted(data.items(), key=lambda x: x[0]):
+        ci = CoherenceInstance(name, instance[u"gold"], instance[u"perms"])
+        instances.append(ci)
+    return CoherenceData(instances)
 
 def extract_barzilay_tar(path_or_url, text_filter=None):
 
     if text_filter is None:
         text_filter = lambda f: ''.join(f.readlines())
 
-    is_zip = path_or_url.endswith("gz") or path_or_url.endswith("Z")
+    is_Z = path_or_url.endswith("Z")
     if path_or_url.startswith("http://"):
         fileobj = StringIO(urllib2.urlopen(path_or_url).read())
     else:
         fileobj = open(path_or_url)
+
+    if is_Z:
+        with open("tmp.gz", mode="w") as f:
+            f.write(fileobj.read())
+            f.flush()
+            os.system("gunzip tmp.gz")
+            fileobj1 = open("tmp", "r")
+            fileobj = StringIO(fileobj1.read())
+            fileobj1.close()
+            os.system("rm rmp")
 
     data = {}
     with tarfile.open(fileobj=fileobj, mode="r") as tar:
@@ -692,6 +731,24 @@ def write_tar(path, data, file_ext=".txt"):
                     info.mtime = time.time()
                     tar.addfile(tarinfo=info, fileobj=perm_text) 
 
+def download_ntsb(train_url, tgz_path, partmap):
+    """Download original dataset from entity grid paper without cleaning."""
+
+    def text_extract(f):
+        text = []
+        for line in f:
+            text.append(line.split(" ", 1)[1])
+            #    re.sub(r"-- ", r"", ))
+        f.close()
+        text = ''.join(text).strip()
+        assert len(text) > 0
+        return text
+
+    data = extract_barzilay_tar(train_url, text_extract)
+    data_renamed = {partmap[partition]: instances 
+                    for partition, instances in data.items()}
+    write_tar(tgz_path, data_renamed)
+ 
 
 def download_apws(train_url, tgz_path, partmap):
     """Download original dataset from entity grid paper without cleaning."""
@@ -718,7 +775,7 @@ def clean_apws_data(apws_tgz, apws_clean_tgz):
 
 
 def make_xml(text_tgz, xml_tgz, mem=u'7G', n_procs=4):
-    data = read_tar(text_tgz)
+    data = read_tar(text_tgz, no_perm_num=False)
     keys = []
     texts = []
     for partition, instances in data.items():
@@ -787,13 +844,17 @@ def make_word_embeddings(path, corpus, clean):
             f.write(' '.join([word_str] + [str(x) for x in model[word]]))
             f.write('\n')
 
-def main(n_procs=2):
+def main(n_procs=2, mem="8G"):
 
+    ntsb_url_train = \
+     "http://people.csail.mit.edu/regina/coherence/data2-train-perm.tar.Z"
+    ntsb_url_test = \
+     "http://people.csail.mit.edu/regina/coherence/CLsubmission/ntsb-test.tgz"
     apws_url_train = \
      "http://people.csail.mit.edu/regina/coherence/data1-train-perm.tar"
     apws_url_test = \
      "http://people.csail.mit.edu/regina/coherence/CLsubmission/data1-test.tgz"
-
+    
     data_dir = os.getenv("COHERENCE_DATA", os.path.join(os.getcwd(), "data"))
     print "Installing data sets for this package in\n\t{} ...".format(
         data_dir)
@@ -832,7 +893,39 @@ def main(n_procs=2):
         data_dir, "clean_apws_test_xml.tar.gz")
     has_clean_apws_test_xml = os.path.exists(clean_apws_test_xml_tgz)
 
-    ### Embeddings path
+    ntsb_train_tgz = os.path.join(
+        data_dir, "b&l_ntsb_train.tar.gz")
+    has_ntsb_train = os.path.exists(ntsb_train_tgz)
+
+    ntsb_test_tgz = os.path.join(
+        data_dir, "b&l_ntsb_test.tar.gz")
+    has_ntsb_test = os.path.exists(ntsb_test_tgz)
+
+    clean_ntsb_train_tgz = os.path.join(
+        data_dir, "clean_ntsb_train.tar.gz")
+    has_clean_ntsb_train = os.path.exists(clean_ntsb_train_tgz)
+
+    clean_ntsb_test_tgz = os.path.join(
+        data_dir, "clean_ntsb_test.tar.gz")
+    has_clean_ntsb_test = os.path.exists(clean_ntsb_test_tgz)
+
+    ntsb_train_xml_tgz = os.path.join(
+        data_dir, "b&l_ntsb_train_xml.tar.gz")
+    has_ntsb_train_xml = os.path.exists(ntsb_train_xml_tgz)
+
+    ntsb_test_xml_tgz = os.path.join(
+        data_dir, "b&l_ntsb_test_xml.tar.gz")
+    has_ntsb_test_xml = os.path.exists(ntsb_test_xml_tgz)
+
+    clean_ntsb_train_xml_tgz = os.path.join(
+        data_dir, "clean_ntsb_train_xml.tar.gz")
+    has_clean_ntsb_train_xml = os.path.exists(clean_ntsb_train_xml_tgz)
+
+    clean_ntsb_test_xml_tgz = os.path.join(
+        data_dir, "clean_ntsb_test_xml.tar.gz")
+    has_clean_ntsb_test_xml = os.path.exists(clean_ntsb_test_xml_tgz)
+
+    ### Embeddings paths. ###
     apws_embeddings = os.path.join(
         data_dir, "apws_embeddings.txt.gz")
     has_apws_embeddings = os.path.exists(apws_embeddings)
@@ -841,7 +934,41 @@ def main(n_procs=2):
         data_dir, "clean_apws_embeddings.txt.gz")
     has_clean_apws_embeddings = os.path.exists(clean_apws_embeddings)
 
+    ntsb_embeddings = os.path.join(
+        data_dir, "ntsb_embeddings.txt.gz")
+    has_ntsb_embeddings = os.path.exists(ntsb_embeddings)
+
+    clean_ntsb_embeddings = os.path.join(
+        data_dir, "clean_ntsb_embeddings.txt.gz")
+    has_clean_ntsb_embeddings = os.path.exists(clean_ntsb_embeddings)
+
     ### Print status. ###
+    print "[{}] Barzilay&Lapata NTSB train txt".format(
+        "X" if has_ntsb_train else " ")
+    print "[{}] Barzilay&Lapata NTSB test txt".format(
+        "X" if has_ntsb_test else " ")
+
+    print "[{}] Barzilay&Lapata NTSB train xml".format(
+        "X" if has_ntsb_train_xml else " ")
+    print "[{}] Barzilay&Lapata NTSB test xml".format(
+        "X" if has_ntsb_test_xml else " ")
+    
+    print "[{}] Clean NTSB train txt".format(
+        "X" if has_clean_ntsb_train else " ")
+    print "[{}] Clean NTSB test txt".format(
+        "X" if has_clean_ntsb_test else " ")
+
+    print "[{}] Clean NTSB train xml".format(
+        "X" if has_clean_ntsb_train_xml else " ")
+    print "[{}] Clean NTSB test xml".format(
+        "X" if has_clean_ntsb_test_xml else " ")
+
+    print "[{}] NTSB Embeddings".format(
+        "X" if has_ntsb_embeddings else " ")
+    
+    print "[{}] Clean NTSB Embeddings".format(
+        "X" if has_clean_ntsb_embeddings else " ")
+
     print "[{}] Barzilay&Lapata APWS train txt".format(
         "X" if has_apws_train else " ")
     print "[{}] Barzilay&Lapata APWS test txt".format(
@@ -868,6 +995,39 @@ def main(n_procs=2):
     print "[{}] Clean APWS Embeddings".format(
         "X" if has_clean_apws_embeddings else " ")
 
+
+    if not has_ntsb_train:
+        print "Downloading NTSB training data"
+        print "from:\n\t{}\nto:\n\t{} ...".format(
+            ntsb_url_train, ntsb_train_tgz)
+        download_ntsb(
+            ntsb_url_train, ntsb_train_tgz, {"training": "ntsb_train"})
+
+    if not has_ntsb_test:
+        print "Downloading NTSB testing data"
+        print "from:\n\t{}\nto:\n\t{} ...".format(
+            ntsb_url_test, ntsb_test_tgz)
+        download_ntsb(
+            ntsb_url_test, ntsb_test_tgz, {"ntsb-test": "ntsb_test"})
+
+    if not has_ntsb_train_xml:
+        print "Processing NTSB training data w/ CoreNLP pipeline"
+        print "from:\n\t{}\nto:\n\t{} ...".format(
+                ntsb_train_tgz, ntsb_train_xml_tgz)
+        make_xml(ntsb_train_tgz, ntsb_train_xml_tgz, n_procs=n_procs, mem=mem)
+
+    if not has_ntsb_test_xml:
+        print "Processing NTSB testing data w/ CoreNLP pipeline"
+        print "from:\n\t{}\nto:\n\t{} ...".format(
+                ntsb_test_tgz, ntsb_test_xml_tgz)
+        make_xml(
+            ntsb_test_tgz, ntsb_test_xml_tgz, n_procs=n_procs, mem=mem)
+
+    if not has_ntsb_embeddings:
+        print "Learning ntsb word embeddings"
+        print "to:\n\t {} ...".format(ntsb_embeddings) 
+        make_word_embeddings(ntsb_embeddings, "ntsb", False)
+ 
     if not has_apws_train:
         print "Downloading APWS training data"
         print "from:\n\t{}\nto:\n\t{} ...".format(
@@ -886,14 +1046,14 @@ def main(n_procs=2):
         print "Processing APWS training data w/ CoreNLP pipeline"
         print "from:\n\t{}\nto:\n\t{} ...".format(
                 apws_train_tgz, apws_train_xml_tgz)
-        make_xml(apws_train_tgz, apws_train_xml_tgz, n_procs=n_procs)
+        make_xml(apws_train_tgz, apws_train_xml_tgz, n_procs=n_procs, mem=mem)
 
     if not has_apws_test_xml:
         print "Processing APWS testing data w/ CoreNLP pipeline"
         print "from:\n\t{}\nto:\n\t{} ...".format(
                 apws_test_tgz, apws_test_xml_tgz)
         make_xml(
-            apws_test_tgz, apws_test_xml_tgz, n_procs=n_procs)
+            apws_test_tgz, apws_test_xml_tgz, n_procs=n_procs, mem=mem)
 
     if not has_clean_apws_train:
         print "Extracting clean APWS training data"
@@ -912,14 +1072,16 @@ def main(n_procs=2):
         print "from:\n\t{}\nto:\n\t{} ...".format(
                 clean_apws_train_tgz, clean_apws_train_xml_tgz)
         make_xml(
-            clean_apws_train_tgz, clean_apws_train_xml_tgz, n_procs=n_procs)
+            clean_apws_train_tgz, clean_apws_train_xml_tgz, 
+            n_procs=n_procs, mem=mem)
 
     if not has_clean_apws_test_xml:
         print "Processing clean APWS testing data w/ CoreNLP pipeline"
         print "from:\n\t{}\nto:\n\t{} ...".format(
                 clean_apws_test_tgz, clean_apws_test_xml_tgz)
         make_xml(
-            clean_apws_test_tgz, clean_apws_test_xml_tgz, n_procs=n_procs)
+            clean_apws_test_tgz, clean_apws_test_xml_tgz, 
+            n_procs=n_procs, mem=mem)
 
     if not has_apws_embeddings:
         print "Learning apws word embeddings"
@@ -931,23 +1093,15 @@ def main(n_procs=2):
         print "to:\n\t {} ...".format(clean_apws_embeddings) 
         make_word_embeddings(clean_apws_embeddings, "apws", True)
 
-     
-
-    #preprocess_barzilay_apws(u"data", "barzilay_apws")
-
 if __name__ == "__main__":
-#    preprocess_barzilay_ntsb(u"data/barzilay_ntsb.tar.gz", 
-#                             u"data/barzilay_ntsb_clean.tar.gz",
-#                             u"data/barzilay_ntsb_clean_xml_perm_train.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_xml_perm_dev.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_xml_perm_test.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_doc_perm_train.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_doc_perm_dev.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_doc_perm_test.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_doc_train.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_doc_dev.pkl.gz",
-#                             u"data/barzilay_ntsb_clean_doc_test.pkl.gz")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--n-procs', default=2, type=int)
+    parser.add_argument('--mem', default="4G", type=str)
 
-    main(n_procs=2)
+    args = parser.parse_args()
+    n_procs = args.n_procs
+    mem = args.mem
+    main(n_procs=n_procs, mem=mem)
 
                              
