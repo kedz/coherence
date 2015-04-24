@@ -769,7 +769,7 @@ def download_apws(train_url, tgz_path, partmap):
     write_tar(tgz_path, data_renamed)
     
 def clean_apws_data(apws_tgz, apws_clean_tgz):
-    data = read_tar(apws_tgz, remove_apws_meta)
+    data = read_tar(apws_tgz, remove_apws_meta, no_perm_num=False)
     data_renamed = {"clean_" + key: val for key, val in data.items()}
     write_tar(apws_clean_tgz, data_renamed)
 
@@ -830,10 +830,10 @@ def make_word_embeddings(path, corpus, clean):
                                   clean=clean, format=u"tokens", 
                                   include_perms=False, convert_brackets=False)
     S = []
-    for doc in docs_train:
+    for doc in docs_train.gold:
         for sent in doc:
             S.append(sent)
-    for doc in docs_test:
+    for doc in docs_test.gold:
         for sent in doc:
             S.append(sent)
     model = gensim.models.Word2Vec(S, size=50, min_count=1, workers=16,
