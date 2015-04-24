@@ -65,8 +65,8 @@ def main(output_model_dir, embed_path, corpus, clean, n_procs=4, max_iters=10):
 
     folds = range(max_folds)
     batch_sizes = [25, ]
-    window_sizes = [3,]# 5, 7]
-    lambdas = [0.1, 0.25,] # 0.5, 1.0, 1.25, 2.0, 2.5, 5.0]
+    window_sizes = [3, 5, 7]
+    lambdas = [0.1, 0.25, 0.5, 1.0, 1.25, 2.0, 2.5, 5.0]
 
     n_settings = len(batch_sizes) * len(window_sizes) * len(lambdas) * \
         len(learning_rates)
@@ -221,13 +221,15 @@ if __name__ ==  u"__main__":
                         help="use the clean version of the corpus")
     parser.add_argument("--max-iters", default=10, type=int,
                         help="max training iterations")
- 
+    parser.add_argument("--n-procs", default=1, type=int,
+                        help="number of processes to use") 
 
   
     args = parser.parse_args()
     corpus = args.corpus
     clean = args.clean
     max_iters = args.max_iters
+    n_procs = args.n_procs
     
     print corpus
     if corpus == "ntsb": 
@@ -245,4 +247,5 @@ if __name__ ==  u"__main__":
         os.getenv("COHERENCE_DATA", "data"), 
         "{}{}_embeddings.txt.gz".format("clean_" if clean else "", corpus))
  
-    main(output_dir, embed_path, corpus, clean, max_iters=max_iters)
+    main(output_dir, embed_path, corpus, clean, 
+        max_iters=max_iters, n_procs=n_procs)
