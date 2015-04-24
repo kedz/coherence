@@ -9,7 +9,6 @@ class TokensTransformer(BaseEstimator):
         self.window_size = window_size
         self.max_sent_len = max_sent_len
 
-
     @classmethod        
     def get_max_sent_len(self, docs):
         docs = self._make_docs_safe(docs)
@@ -131,6 +130,18 @@ class TokensTransformer(BaseEstimator):
             row_offset += doc_len * doc_len
             input_row_offset += doc_len
         return X_iw, y
+
+    def testing_window_transform(self, dataset):
+        X_iw_gold = []
+        X_iw_perm = []
+
+        for inst in dataset:
+            x_iw_gold = [self.window_transform([inst.gold])] * inst.num_perms
+            x_iw_perms = [self.window_transform([perm]) for perm in inst.perms]
+            X_iw_gold.extend(x_iw_gold)
+            X_iw_perm.extend(x_iw_perms)
+        return X_iw_gold, X_iw_perm
+
 
     def pprint_token_index_sequences(self, X_is, cutoff=20):
         if len(X_is.shape) == 1:
