@@ -821,7 +821,7 @@ def make_xml(text_tgz, xml_tgz, mem=u'7G', n_procs=4):
 
     write_tar(xml_tgz, xml_data, file_ext=".xml")
 
-def make_word_embeddings(path, corpus, clean):
+def make_word_embeddings(path, corpus, clean, max_iters):
     docs_train = get_barzilay_data(corpus=corpus, part=u"train", 
                                    clean=clean, format=u"tokens", 
                                    include_perms=False, convert_brackets=False)
@@ -837,14 +837,14 @@ def make_word_embeddings(path, corpus, clean):
         for sent in doc:
             S.append(sent)
     model = gensim.models.Word2Vec(S, size=50, min_count=1, workers=16,
-                                   iter=100)
+                                   iter=max_iters)
     with gzip.open(path, "w") as f:
         for word in model.vocab.keys():
             word_str = word.encode(u'utf-8')
             f.write(' '.join([word_str] + [str(x) for x in model[word]]))
             f.write('\n')
 
-def main(n_procs=2, mem="8G"):
+def main(n_procs=2, mem="8G", embed_iters=1000):
 
     ntsb_url_train = \
      "http://people.csail.mit.edu/regina/coherence/data2-train-perm.tar.Z"
@@ -1026,7 +1026,7 @@ def main(n_procs=2, mem="8G"):
     if not has_ntsb_embeddings:
         print "Learning ntsb word embeddings"
         print "to:\n\t {} ...".format(ntsb_embeddings) 
-        make_word_embeddings(ntsb_embeddings, "ntsb", False)
+        make_word_embeddings(ntsb_embeddings, "ntsb", False, embed_iters)
  
     if not has_apws_train:
         print "Downloading APWS training data"
@@ -1086,22 +1086,24 @@ def main(n_procs=2, mem="8G"):
     if not has_apws_embeddings:
         print "Learning apws word embeddings"
         print "to:\n\t {} ...".format(apws_embeddings) 
-        make_word_embeddings(apws_embeddings, "apws", False)
+        make_word_embeddings(apws_embeddings, "apws", False, embed_iters)
     
     if not has_clean_apws_embeddings:
         print "Learning clean apws word embeddings"
         print "to:\n\t {} ...".format(clean_apws_embeddings) 
-        make_word_embeddings(clean_apws_embeddings, "apws", True)
+        make_word_embeddings(clean_apws_embeddings, "apws", True, embed_iters)
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--n-procs', default=2, type=int)
     parser.add_argument('--mem', default="4G", type=str)
+    parser.add_argument('--embed-iters', default=1000, type=int)
 
     args = parser.parse_args()
     n_procs = args.n_procs
     mem = args.mem
-    main(n_procs=n_procs, mem=mem)
+    embed_iters = args.embed_iters
+    main(n_procs=n_procs, mem=mem, embed_iters=embed_iters)
 
                              
