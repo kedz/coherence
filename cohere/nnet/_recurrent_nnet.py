@@ -9,9 +9,6 @@ class RecurrentNNModel(_BaseNNModel):
                 u"y": T.ivector(name=u"y"),
                 u"M_iw": T.imatrix(name=u"M_iw")} 
 
-
-       
-
     def _init_params(self):
         
         embeddings = self.embeddings
@@ -447,17 +444,24 @@ class RecurrentNNModel(_BaseNNModel):
         )
 
 
+        nll_tm1 = np.zeros((n_batches,))
+        nll_delta = np.zeros((n_batches),)
         for n_iter in xrange(1, self.max_iters + 1):
-
+            
             for i in xrange(n_batches):
-                print "iter", n_iter, "batch", i+1, "/", n_batches
+                #print "iter", n_iter, "batch", i+1, "/", n_batches
                 cost, nll, reg = train_model(i)
-                print "nll {:0.6f}".format(float(nll)),
-                print "reg {:0.6f}".format(float(reg)),
-                print "cost {:0.6f}".format(float(cost))
-            print
+                
+                nll_delta[i] = nll_tm1[i] - nll
+                nll_tm1[i] = nll               
+#print "nll {:0.6f}".format(float(nll)),
+#                print "reg {:0.6f}".format(float(reg)),
+#                print "cost {:0.6f}".format(float(cost))
+            #print
             if self.fit_callback is not None:
                 self.fit_callback(self, n_iter)
+            else:
+                print n_iter, np.mean(nll_delta)
 
     def _mask(self, X_iw):
         M_iw = np.ones_like(X_iw)
