@@ -328,6 +328,23 @@ class TreeTransformer(object):
             input_row_offset += doc_len
         return X_iw, O_iw, y
 
+    def testing_window_transform(self, dataset):
+        X_iw_gold = []
+        O_iw_gold = []
+        X_iw_perm = []
+        O_iw_perm = []
+
+        for inst in dataset:
+            x_iw_gold, o_iw_gold = self.window_transform([inst.gold]) 
+            
+            for perm in inst.perms:
+                x_iw_perms, o_iw_perms = self.window_transform([perm])
+                X_iw_gold.append(x_iw_gold)
+                O_iw_gold.append(o_iw_gold)
+                X_iw_perm.append(x_iw_perms)
+                O_iw_perm.append(o_iw_perms)
+        return X_iw_gold, O_iw_gold, X_iw_perm, O_iw_perm
+
 
     def pprint_token_index_sequences(self, X_is, cutoff=20):
         if len(X_is.shape) == 1:
