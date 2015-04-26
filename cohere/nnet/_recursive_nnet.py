@@ -484,17 +484,15 @@ class RecursiveNNModel(_BaseNNModel):
         )
         
 
+        batch_nll = np.zeros((n_batches,))
         for n_iter in xrange(1, self.max_iters + 1):
-
             for i in xrange(n_batches):
-                print "iter", n_iter, "batch", i+1, "/", n_batches
                 cost, nll, reg = train_model(i)
-                print "nll {:0.6f}".format(float(nll)),
-                print "reg {:0.6f}".format(float(reg)),
-                print "cost {:0.6f}".format(float(cost))
-            print 
+                batch_nll[i] = nll
             if self.fit_callback is not None:
                 self.fit_callback(self, n_iter)
+            else:
+                print n_iter, "avg batch nll", np.mean(batch_nll)
 
     def score(self, X_gold, O_gold, X_perm, O_perm):
         correct = 0
