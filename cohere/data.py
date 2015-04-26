@@ -26,6 +26,8 @@ class CoherenceData(object):
     def __getitem__(self, obj):
         if isinstance(obj, collections.Iterable):
             selection = [self.instances[i] for i in obj]
+        elif isinstance(obj, slice):
+            selection = self.instances[obj]
         else:
             selection = [self.instances[obj]]
         return CoherenceData(selection)
