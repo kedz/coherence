@@ -1,8 +1,8 @@
-#bbfrom cohere.structs import negative_window_gen, positive_window_gen
 import os
 import gzip
 import numpy as np
 from itertools import izip
+import pkg_resources
 
 class WordEmbeddings(object):
     def __init__(self, token2index, embeddings):
@@ -33,6 +33,30 @@ class WordEmbeddings(object):
                 current_index += 1
         embed = np.array(embed, dtype=dtype)
         return WordEmbeddings(token2index, embed)
+    
+    @staticmethod
+    def li_hovy_embeddings(corpus, dtype=np.float64):
+        if corpus not in ["apws", "ntsb"]:
+            raise Exception("corpus argument must be either 'apws' or 'ntsb'")
+        bytestream = pkg_resources.resource_stream(
+            "cohere.nnet.word_embeddings",
+            "li.hovy.{}.embeddings.txt.gz".format(corpus))
+
+        # Read in embeddings and map tokens to indices in the embedding 
+        # matrix.
+        embed = []
+        current_index = 0
+        token2index = {}
+        with gzip.GzipFile(fileobj=bytestream, mode="r") as f:
+            for line in f:
+                line = line.strip().split(" ")
+                word = line.pop(0).decode(u"utf-8")
+                embed.append([float(x) for x in line])
+                token2index[word] = current_index
+                current_index += 1
+        embed = np.array(embed, dtype=dtype)
+        return WordEmbeddings(token2index, embed)
+ 
 
     def __str__(self):
         return unicode(self)

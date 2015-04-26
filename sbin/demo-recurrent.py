@@ -3,27 +3,23 @@ from cohere.pprint import pprint as pp
 from cohere.nnet import TokensTransformer, WordEmbeddings, RecurrentNNModel
 import os
 
-def main():
+def main(corpus="apws"):
 
+
+    embed = WordEmbeddings.li_hovy_embeddings(corpus)
     train_dataset = cohere.data.get_barzilay_data(
-        corpus="apws", part="train", format="tokens", clean=False, 
+        corpus=corpus, part="train", format="tokens", clean=False, 
         convert_brackets=False)
     test_dataset = cohere.data.get_barzilay_data(
-        corpus="apws", part="test", format="tokens", clean=False, 
+        corpus=corpus, part="test", format="tokens", clean=False, 
         convert_brackets=False)
 
     print "Some example data: "
     pp(train_dataset[0:5])
         
-    embed_path = os.path.join(
-        os.getenv("COHERENCE_DATA", "data"), 
-        "apws_embeddings.txt.gz")
-       # .format("clean_" if clean else "", corpus))
-#    print "Reading word embeddings from {} ...".format(embed_path)
-    embed = WordEmbeddings.from_file(embed_path)
 
-    print "We need to know the maximum sentence length in order to put all" +\
-        " input windows into a single matrix for batch learning."            
+    print "We need to know the maximum sentence length in order to put\n" +\
+        "all input windows into a single matrix for batch learning."
     max_sent_len = TokensTransformer.get_max_sent_len(
         train_dataset.gold + test_dataset.gold)
     print "The maximum sentence length is {}".format(max_sent_len)
