@@ -350,14 +350,12 @@ class RecurrentNNModel(_BaseNNModel):
                 n_steps=max_sent_len)
             h_si = h_si[-1]
             if i < cntr_idx:
-                print "start", i
                 x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
                 h_si = T.switch(
                     T.all(T.eq(x_iw, -1), axis=1, keepdims=True),  
                     self.params["W_start"][i],
                     h_si)
             elif i > cntr_idx:
-                print "stop", i - cntr_idx - 1
                 x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
                 h_si = T.switch(
                     T.all(T.eq(x_iw, -1), axis=1, keepdims=True),    
@@ -445,24 +443,16 @@ class RecurrentNNModel(_BaseNNModel):
         )
 
 
-        nll_tm1 = np.zeros((n_batches,))
-        nll_delta = np.zeros((n_batches),)
+        batch_nll = np.zeros((n_batches,))
         for n_iter in xrange(1, self.max_iters + 1):
             
             for i in xrange(n_batches):
-                #print "iter", n_iter, "batch", i+1, "/", n_batches
                 cost, nll, reg = train_model(i)
-                
-                nll_delta[i] = nll_tm1[i] - nll
-                nll_tm1[i] = nll               
-#print "nll {:0.6f}".format(float(nll)),
-#                print "reg {:0.6f}".format(float(reg)),
-#                print "cost {:0.6f}".format(float(cost))
-            #print
+                batch_nll[i] = nll               
             if self.fit_callback is not None:
                 self.fit_callback(self, n_iter)
             else:
-                print n_iter, np.mean(nll_tm1), np.mean(nll_delta)
+                print n_iter, "avg batch nll", np.mean(batch_nll)
 
     def _mask(self, X_iw):
         M_iw = np.ones_like(X_iw)

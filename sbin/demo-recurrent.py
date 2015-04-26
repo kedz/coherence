@@ -29,16 +29,22 @@ def main(corpus="apws"):
 
     X_iw_train, y_train = transformer.training_window_transform(
         train_dataset.gold)
-
-    nnet = RecurrentNNModel(embed, max_sent_len=max_sent_len, lam=1., 
-        alpha=.01, batch_size=25, window_size=7, max_iters=10, 
-        fit_embeddings=True)
-    nnet.fit(X_iw_train, y_train)
-
     X_test_gold, X_test_perm = transformer.testing_window_transform(
         test_dataset)
     X_train_gold, X_train_perm = transformer.testing_window_transform(
         train_dataset)
+
+
+    def callback(nnet, n_iter):
+        print n_iter, 
+        print "Train Acc.", nnet.score(X_train_gold, X_train_perm),
+        print "Test Acc.", nnet.score(X_test_gold, X_test_perm)
+    nnet = RecurrentNNModel(embed, max_sent_len=max_sent_len, lam=1., 
+        alpha=.01, batch_size=25, window_size=5, max_iters=10, 
+        fit_embeddings=True, fit_callback=callback)
+    nnet.fit(X_iw_train, y_train)
+
+
     print "Train Acc.", nnet.score(X_train_gold, X_train_perm)
     print "Test Acc.", nnet.score(X_test_gold, X_test_perm)
 

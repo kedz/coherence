@@ -7,7 +7,6 @@ import multiprocessing
 import signal
 import Queue
 
-
 import cohere.data
 import numpy as np
 from itertools import product
@@ -80,7 +79,6 @@ def main(output_model_dir, embed_path, corpus, clean, n_procs=4, max_iters=10):
             jobs.put(        
                 (n_setting, fold, alpha, lam, win_size, batch_size,))
 
-
     results = []
     pool = []
     for i in xrange(n_procs):
@@ -109,7 +107,7 @@ def main(output_model_dir, embed_path, corpus, clean, n_procs=4, max_iters=10):
             corpus=corpus, part="test", format="tokens", clean=clean, 
             convert_brackets=False)
 
-        embed = WordEmbeddings.from_file(embed_path)
+        embed = WordEmbeddings.li_hovy_embeddings(corpus)
         max_sent_len = TokensTransformer.get_max_sent_len(test_data.gold)
 
         nnet = get_averaged_model(best_params, embed, max_sent_len, max_folds,
@@ -156,11 +154,7 @@ def worker(job_queue, result_queue, **kwargs):
         corpus=corpus, part="train", format="tokens", clean=clean, 
         convert_brackets=False)
     
-    embed_path = os.path.join(
-        os.getenv("COHERENCE_DATA", "data"), 
-        "{}{}_embeddings.txt.gz".format("clean_" if clean else "", corpus))
-    print "Reading word embeddings from {} ...".format(embed_path)
-    embed = WordEmbeddings.from_file(embed_path)
+    embed = WordEmbeddings.li_hovy_embeddings(corpus)
    
     max_sent_len = TokensTransformer.get_max_sent_len(dataset.gold)
     n_data = len(dataset)
