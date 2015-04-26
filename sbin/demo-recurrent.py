@@ -9,10 +9,10 @@ def main(corpus="apws"):
     embed = WordEmbeddings.li_hovy_embeddings(corpus)
     train_dataset = cohere.data.get_barzilay_data(
         corpus=corpus, part="train", format="tokens", clean=False, 
-        convert_brackets=False)
+        convert_brackets=True)
     test_dataset = cohere.data.get_barzilay_data(
         corpus=corpus, part="test", format="tokens", clean=False, 
-        convert_brackets=False)
+        convert_brackets=True)
 
     print "Some example data: "
     pp(train_dataset[0:5])
@@ -41,7 +41,7 @@ def main(corpus="apws"):
         print "Test Acc.", nnet.score(X_test_gold, X_test_perm)
     nnet = RecurrentNNModel(embed, max_sent_len=max_sent_len, lam=1., 
         alpha=.01, batch_size=25, window_size=5, max_iters=10, 
-        fit_embeddings=True, fit_callback=callback)
+        fit_embeddings=False, fit_callback=callback)
     nnet.fit(X_iw_train, y_train)
 
 
