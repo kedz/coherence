@@ -238,7 +238,8 @@ class RecurrentNNModel(_BaseNNModel):
         current_pointer = next_pointer
        
         if self.fit_embeddings is True:
-            next_pointer = current_pointer + n_words * word_dim
+            next_pointer = current_pointer + \
+                self.embeddings.W.shape[0] * word_dim
             E = self.theta[current_pointer:next_pointer].reshape(
                 embeddings.W.shape)
             E.name = "E"
@@ -461,7 +462,7 @@ class RecurrentNNModel(_BaseNNModel):
             if self.fit_callback is not None:
                 self.fit_callback(self, n_iter)
             else:
-                print n_iter, np.mean(nll_delta)
+                print n_iter, np.mean(nll_tm1), np.mean(nll_delta)
 
     def _mask(self, X_iw):
         M_iw = np.ones_like(X_iw)
