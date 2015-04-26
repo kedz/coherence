@@ -14,11 +14,12 @@ import collections
 
 
 class CoherenceData(object):
-    def __init__(self, instances):
+    def __init__(self, instances, format):
         self.instances = instances
         self.gold = [inst.gold for inst in instances]
         self.perms = [inst.perms for inst in instances]
         self.ids = [inst.id for inst in instances]
+        self.format = format
 
     def __len__(self):
         return len(self.instances)
@@ -30,14 +31,15 @@ class CoherenceData(object):
             selection = self.instances[obj]
         else:
             selection = [self.instances[obj]]
-        return CoherenceData(selection)
+        return CoherenceData(selection, self.format)
 
     def __iter__(self):
         return iter(self.instances)        
 
 class CoherenceInstance(object):
-    def __init__(self, id, gold, perms):
+    def __init__(self, id, format, gold, perms):
         self.id = id
+        self.format = format
         self.gold = gold
         self.perms = perms
         self.num_perms = len(perms)
@@ -608,9 +610,10 @@ def get_barzilay_data(corpus=u"apws", part=u"train",
 
     instances = []
     for name, instance in sorted(data.items(), key=lambda x: x[0]):
-        ci = CoherenceInstance(name, instance[u"gold"], instance[u"perms"])
+        ci = CoherenceInstance(
+            name, format, instance[u"gold"], instance[u"perms"])
         instances.append(ci)
-    return CoherenceData(instances)
+    return CoherenceData(instances, format)
 
 def extract_barzilay_tar(path_or_url, text_filter=None):
 
