@@ -105,7 +105,7 @@ def main(output_model_dir, embed_path, corpus, clean, n_procs=4, max_iters=10):
         print "Loading testing data..."
         test_data = cohere.data.get_barzilay_data(
             corpus=corpus, part="test", format="tokens", clean=clean, 
-            convert_brackets=False)
+            convert_brackets=True)
 
         embed = WordEmbeddings.li_hovy_embeddings(corpus)
         max_sent_len = TokensTransformer.get_max_sent_len(test_data.gold)
@@ -152,7 +152,7 @@ def worker(job_queue, result_queue, **kwargs):
           
     dataset = cohere.data.get_barzilay_data(
         corpus=corpus, part="train", format="tokens", clean=clean, 
-        convert_brackets=False)
+        convert_brackets=True)
     
     embed = WordEmbeddings.li_hovy_embeddings(corpus)
    
