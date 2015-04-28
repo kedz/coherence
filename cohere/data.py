@@ -11,6 +11,7 @@ import re
 import urllib2
 import gensim
 import collections
+from nltk.tree import Tree
 
 
 class CoherenceData(object):
@@ -162,438 +163,70 @@ def remove_apws_meta(f):
 
     return "\n".join(clean_text)
 
-def preprocess_barzilay_apws(data_dir, corpus):
-        
-        
-#        path_to_apws_tgz, 
-#        
-#                             path_to_xml_train_perm_pkl_tgz,
-#                             path_to_xml_dev_perm_pkl_tgz,
-#                             path_to_xml_test_perm_pkl_tgz,
-#                             path_to_doc_train_perm_pkl_tgz,
-#                             path_to_doc_dev_perm_pkl_tgz,
-#                             path_to_doc_test_perm_pkl_tgz,
-#                             path_to_doc_train_pkl_tgz,
-#                             path_to_doc_dev_pkl_tgz,
-#                             path_to_doc_test_pkl_tgz):
-
-    orig_path = os.path.join(data_dir, corpus + ".tar.gz")
-    clean_tgz = os.path.join(data_dir, corpus + "_clean.tar.gz")
-    clean_no_meta_tgz = os.path.join(
-        data_dir, corpus + "_clean_no_meta.tar.gz")
-
-#    u"data/barzilay_apws_clean.tar.gz",
-#                             u"data/barzilay_apws_clean_xml_perm_train.pkl.gz",
-#                             u"data/barzilay_apws_clean_xml_perm_dev.pkl.gz",
-#                             u"data/barzilay_apws_clean_xml_perm_test.pkl.gz",
-#                             u"data/barzilay_apws_clean_doc_perm_train.pkl.gz",
-#                             u"data/barzilay_apws_clean_doc_perm_dev.pkl.gz",
-#                             u"data/barzilay_apws_clean_doc_perm_test.pkl.gz",
-#                             u"data/barzilay_apws_clean_doc_train.pkl.gz",
-#                             u"data/barzilay_apws_clean_doc_dev.pkl.gz",
-#                             u"data/barzilay_apws_clean_doc_test.pkl.gz")
-        
-        
-    test_instances = {}
-    train_instances = {}
-
-    train_instances_no_meta = {}
-    test_instances_no_meta = {}
-
-    with tarfile.open(orig_path, "r:gz") as tar:
-        for tarinfo in tar:
-            if tarinfo.isreg():
-                if "perm" not in os.path.basename(tarinfo.name):
-                    continue
-                instance_name, _, perm = os.path.basename(
-                    tarinfo.name).split(".")
-                items = os.path.basename(tarinfo.name).split("-")    
-                instance_name = items[0]
-                
-                perm_no = re.search(
-                    r"perm-(\d+)", 
-                    os.path.basename(tarinfo.name)).groups(1)[0]
-                perm_no = int(perm_no)
-
-                partition = os.path.split(os.path.dirname(tarinfo.name))[1]
-                f = tar.extractfile(tarinfo)
-                text = []
-                for line in f:
-                    text.append(line.split(" ", 1)[1])
-                f.close()
-                text = ''.join(text).strip()
-
-                assert partition == u"test" or partition == u"train"
-                if partition == u"test":
-                    data_dict = test_instances
-                    data_dict_no_meta = test_instances_no_meta
-                else:
-                    data_dict = train_instances
-                    data_dict_no_meta = train_instances_no_meta
-
-                if instance_name not in data_dict:
-                    data_dict[instance_name] = {
-                        u"gold": None, u"perms": list()}
-                if instance_name not in data_dict_no_meta:
-                    data_dict_no_meta[instance_name] = {
-                        u"gold": None, u"perms": list()}
-                if perm_no == 1:
-                    data_dict[instance_name][u"gold"] = text
-                    no_meta_text = remove_apws_meta(text)
-                    data_dict_no_meta[instance_name][u"gold"] = no_meta_text
-                else:
-                    data_dict[instance_name][u"perms"].append( 
-                        (perm_no, text))
-                    no_meta_text = remove_apws_meta(text)
-                    data_dict_no_meta[instance_name][u"perms"].append(
-                        (perm_no, no_meta_text))
-
-    for name in train_instances.keys():
-        assert len(train_instances[name]["perms"]) <= 20
-
-    for name in test_instances.keys():
-        assert len(test_instances[name]["perms"]) <= 20
-
-    def write_partition(tar, instances, label, root_label):    
-        for instance_name in sorted(instances.keys()):
-            instance = instances[instance_name]
-            path = os.path.join(root_label, label, instance_name)
-            info = tarfile.TarInfo(name=path)
-            info.type = tarfile.DIRTYPE
-            info.mode = 0755
-            info.mtime = time.time()
-            tar.addfile(tarinfo=info)
-
-            gold_path = os.path.join(path, "gold.txt")
-            gold_text = StringIO(instance[u"gold"])
-            info = tarfile.TarInfo(name=gold_path)
-            info.size=len(gold_text.buf)
-            info.mtime = time.time()
-            tar.addfile(tarinfo=info, fileobj=gold_text) 
-            
-            perms = instance[u"perms"]
-            perms.sort(key=lambda x: x[0])
-            for perm_no, perm in perms:
-                perm_path = os.path.join(
-                    path, "perms", "{}.txt".format(perm_no))
-                perm_text = StringIO(perm)
-                info = tarfile.TarInfo(name=perm_path)
-                info.size = len(perm_text.buf)
-                info.mtime = time.time()
-                tar.addfile(tarinfo=info, fileobj=perm_text) 
-
-    with tarfile.open(clean_tgz, u"w:gz") as tar:
-        print "Writing to {} ...".format(clean_tgz)
-        print "Writing train clean docs/perms..."
-        write_partition(tar, train_instances, "train", corpus + "_clean")
-        print "Writing test apws clean docs/perms..."
-        write_partition(tar, test_instances, "test", corpus + "_clean")
-
-    with tarfile.open(clean_no_meta_tgz, u"w:gz") as tar:
-        print "Writing to {} ...".format(clean_no_meta_tgz)
-        print "Writing train clean docs/perms w/o meta..."
-        write_partition(tar, train_instances_no_meta, 
-            "train", corpus + "_clean_no_meta")
-        print "Writing test clean docs/perms w/o meta..."
-        write_partition(tar, test_instances_no_meta, 
-            "test", corpus + "_clean_no_meta")
-
-    import sys
-    sys.exit()
-    corenlp_props = {"ssplit.newlineIsSentenceBreak": "always"}
-    anns = ["tokenize", "ssplit",] # "pos", "lemma", "ner", "parse"]
-
-    
-
-    def ann(instances, pipeline, n_procs=2):
-        xml_data = []
-        
-        keys = []
-        texts = []
-        for instance_name, instance in instances:
-            keys.append(instance_name)
-            texts.append(instance[u"gold"])
-            for perm_no, perm in instance[u"perm"]:
-                keys.append((perm_no, instance_name))
-                texts.append(perm)
-             
-        for key, xml in pipeline.annotate_mp_iter_unordered(
-                texts, keys=keys, n_procs=n_procs):
-
-            print key
-        
-#        doc_data = []
-#        instances = instances.items()
-#        random.shuffle(instances)
-#        n_instances = len(instances)
-#        for n_instance, (instance_name, instance) in enumerate(instances, 1):
-#            gold_text = instance[u"gold"]
-#            print "{}/{}".format(n_instance, n_instances), instance_name
-#            gold_xml = client.annotate(gold_text, return_xml=True)
-#            perm_texts = [perm for perm_no, perm in instance[u"perms"]] 
-#            perm_xmls = client.annotate_mp(
-#                perm_texts, return_xml=True, n_procs=2)
-#      
-#            xml_data.append({u"gold": gold_xml, u"perms": perm_xmls})
-#            gold_doc = corenlp.read_xml(StringIO(gold_xml.encode(u"utf-8")))
-#
-#            perm_bufs = [StringIO(perm_xml.encode(u"utf-8"))
-#                         for perm_xml in perm_xmls]
-#            perm_docs = [corenlp.read_xml(perm_buf) for perm_buf in perm_bufs]
-#            doc_data.append({u"gold": gold_doc, u"perms": perm_docs})
-#        return xml_data, doc_data
-
-    with corenlp.Server(mem=u'3G', annotators=anns, threads=2,
-                        corenlp_props=corenlp_props) as client:
- 
-        print "Annotating test data..."
-        test_xml_perm_data, test_doc_perm_data = ann(test_instances, client)
-        import sys
-        sys.exit()
-        print "Writing test data..."
-        with gzip.open(path_to_xml_test_perm_pkl_tgz, u"w") as f:
-            pickle.dump(test_xml_perm_data, f)
-        with gzip.open(path_to_doc_test_perm_pkl_tgz, u"w") as f:
-            pickle.dump(test_doc_perm_data, f)
-        with gzip.open(path_to_doc_test_pkl_tgz, u"w") as f:
-            pickle.dump([inst[u"gold"] for inst in test_doc_perm_data], f)
-
-        print "Annotating train data..."
-        train_xml_perm_data, train_doc_perm_data = ann(train_instances, client)
-#        dev_xml_perm_data = train_xml_perm_data[90:]
-#        dev_doc_perm_data = train_doc_perm_data[90:]
-#        train_xml_perm_data = train_xml_perm_data[:90]
-#        train_doc_perm_data = train_doc_perm_data[:90]
-
-        print "Writing training data..."
-        with gzip.open(path_to_xml_train_perm_pkl_tgz, u"w") as f:
-            pickle.dump(train_xml_perm_data, f)
-        with gzip.open(path_to_doc_train_perm_pkl_tgz, u"w") as f:
-            pickle.dump(train_doc_perm_data, f)
-        with gzip.open(path_to_doc_train_pkl_tgz, u"w") as f:
-            pickle.dump([inst[u"gold"] for inst in train_doc_perm_data], f)
-
-     #   print "Writing dev data..."
-     #   with gzip.open(path_to_xml_dev_perm_pkl_tgz, u"w") as f:
-     #       pickle.dump(dev_xml_perm_data, f)
-     #   with gzip.open(path_to_doc_dev_perm_pkl_tgz, u"w") as f:
-     #       pickle.dump(dev_doc_perm_data, f)
-     #   with gzip.open(path_to_doc_dev_pkl_tgz, u"w") as f:
-     #       pickle.dump([inst[u"gold"] for inst in dev_doc_perm_data], f)
-
-
-def preprocess_barzilay_ntsb(path_to_ntsb_tgz, path_to_ntsb_clean_tgz,
-                             path_to_xml_train_perm_pkl_tgz, 
-                             path_to_xml_dev_perm_pkl_tgz, 
-                             path_to_xml_test_perm_pkl_tgz, 
-                             path_to_doc_train_perm_pkl_tgz, 
-                             path_to_doc_dev_perm_pkl_tgz, 
-                             path_to_doc_test_perm_pkl_tgz, 
-                             path_to_doc_train_pkl_tgz, 
-                             path_to_doc_dev_pkl_tgz, 
-                             path_to_doc_test_pkl_tgz):
-
-    test_instances = {}
-    train_instances = {}
-
-    with tarfile.open(path_to_ntsb_tgz, "r:gz") as tar:
-        for tarinfo in tar:
-            if tarinfo.isreg():
-                if "perm" not in os.path.basename(tarinfo.name):
-                    continue
-                instance_name, _, perm = os.path.basename(
-                    tarinfo.name).split(".")
-                perm_no = int(perm.split("-")[1])
-                
-                partition = os.path.split(os.path.dirname(tarinfo.name))[1]
-
-                f = tar.extractfile(tarinfo)
-                text = []
-                for line in f:
-                    assert instance_name in line
-                    text.append(line.split(" ", 1)[1])
-                f.close()
-                text = ''.join(text).strip()
-                assert partition == u"test" or partition == u"train"
-                if partition == u"test":
-                    data_dict = test_instances
-                else:
-                    data_dict = train_instances
-                if instance_name not in data_dict:
-                    data_dict[instance_name] = {
-                        u"gold": None, u"perms": list()}
-                if perm_no == 1:
-                    data_dict[instance_name][u"gold"] = text
-                    print text
-                    print
-                else:
-                    data_dict[instance_name][u"perms"].append( 
-                        (perm_no, text))
-    for name in train_instances.keys():
-        assert len(train_instances[name]["perms"]) <= 20
-    for name in test_instances.keys():
-        assert len(test_instances[name]["perms"]) <= 20
-
-    import sys
-    sys.exit()
-    def write_partition(tar, instances, label):    
-        for instance_name, instance in instances.items():
-            path = os.path.join("barzilay_ntsb_clean", label, instance_name)
-            info = tarfile.TarInfo(name=path)
-            info.type = tarfile.DIRTYPE
-            info.mode = 0755
-            info.mtime = time.time()
-            tar.addfile(tarinfo=info)
-
-            gold_path = os.path.join(path, "gold.txt")
-            gold_text = StringIO(instance[u"gold"])
-            info = tarfile.TarInfo(name=gold_path)
-            info.size=len(gold_text.buf)
-            info.mtime = time.time()
-            tar.addfile(tarinfo=info, fileobj=gold_text) 
-            
-            perms = instance[u"perms"]
-            perms.sort(key=lambda x: x[0])
-            for perm_no, perm in perms:
-                perm_path = os.path.join(
-                    path, "perms", "{}.txt".format(perm_no))
-                perm_text = StringIO(perm)
-                info = tarfile.TarInfo(name=perm_path)
-                info.size=len(perm_text.buf)
-                info.mtime = time.time()
-                tar.addfile(tarinfo=info, fileobj=perm_text) 
-
-    with tarfile.open(path_to_ntsb_clean_tgz, u"w:gz") as tar:
-        print "Writing train ntsb clean docs/perms..."
-        write_partition(tar, train_instances, "train")
-        print "Writing test ntsb clean docs/perms..."
-        write_partition(tar, test_instances, "test")
-
-    corenlp_props = {"ssplit.newlineIsSentenceBreak": "always"}
-
-    annotators = ["tokenize", "ssplit", "pos", "lemma", "ner", "depparse"]
-    corenlp.server.start(corenlp_props=corenlp_props, mem="32G",
-                         annotators=annotators, threads=8)
-    client = corenlp.client.CoreNLPClient()
-
-    def ann(instances):
-        xml_data = []
-        doc_data = []
-        instances = instances.items()
-        n_instances = len(instances)
-        random.shuffle(instances)
-        for n_instance, (instance_name, instance) in enumerate(instances, 1):
-            print "{}/{}".format(n_instance, n_instances), instance_name
-            gold_text = instance[u"gold"]
-            gold_xml = client.annotate(gold_text, return_xml=True)
-            perm_texts = [perm for perm_no, perm in instance[u"perms"]] 
-            perm_xmls = client.annotate_mp(
-                perm_texts, return_xml=True, n_procs=2)       
-            
-            xml_data.append({u"gold": gold_xml, u"perms": perm_xmls})
-            gold_doc = corenlp.read_xml(StringIO(gold_xml.encode(u"utf-8")))
-            
-            perm_bufs = [StringIO(perm_xml.encode(u"utf-8"))
-                         for perm_xml in perm_xmls]
-            perm_docs = [corenlp.read_xml(perm_buf) for perm_buf in perm_bufs]
-            doc_data.append({u"gold": gold_doc, u"perms": perm_docs})
-        return xml_data, doc_data
-
-    print "Annotating test data..."
-    test_xml_perm_data, test_doc_perm_data = ann(test_instances) 
-    print "Writing test data..."
-    with gzip.open(path_to_xml_test_perm_pkl_tgz, u"w") as f:
-        pickle.dump(test_xml_perm_data, f)
-    with gzip.open(path_to_doc_test_perm_pkl_tgz, u"w") as f:
-        pickle.dump(test_doc_perm_data, f)
-    with gzip.open(path_to_doc_test_pkl_tgz, u"w") as f:
-        pickle.dump([inst[u"gold"] for inst in test_doc_perm_data], f)
-
-    print "Annotating train data..."
-    train_xml_perm_data, train_doc_perm_data = ann(train_instances) 
-    dev_xml_perm_data = train_xml_perm_data[90:]
-    dev_doc_perm_data = train_doc_perm_data[90:]
-    train_xml_perm_data = train_xml_perm_data[:90]
-    train_doc_perm_data = train_doc_perm_data[:90]
-
-    print "Writing train data..."
-    with gzip.open(path_to_xml_train_perm_pkl_tgz, u"w") as f:
-        pickle.dump(train_xml_perm_data, f)
-    with gzip.open(path_to_doc_train_perm_pkl_tgz, u"w") as f:
-        pickle.dump(train_doc_perm_data, f)
-    with gzip.open(path_to_doc_train_pkl_tgz, u"w") as f:
-        pickle.dump([inst[u"gold"] for inst in train_doc_perm_data], f)
-
-    with gzip.open(path_to_xml_dev_perm_pkl_tgz, u"w") as f:
-        pickle.dump(dev_xml_perm_data, f)
-    with gzip.open(path_to_doc_dev_perm_pkl_tgz, u"w") as f:
-        pickle.dump(dev_doc_perm_data, f)
-    with gzip.open(path_to_doc_dev_pkl_tgz, u"w") as f:
-        pickle.dump([inst[u"gold"] for inst in dev_doc_perm_data], f)
-      
-    corenlp.server.stop()
-
-def get_barzilay_clean_docs_only(corpus="ntsb", part="train",
-                                 tokens_only=False):
-    data_dir = os.getenv("COHERENCE_DATA", "data")
-    path = os.path.join(
-        data_dir, "barzilay_{}_clean_doc_{}.pkl.gz".format(corpus, part))
-    with gzip.open(path, u"r") as f:
-        docs = pickle.load(f)
-    if tokens_only:
-        token_only_docs = [[[unicode(t).lower() for t in sent]
-                            for sent in doc]
-                           for doc in docs] 
-        return token_only_docs
-    else:
-        return docs
-
-def get_barzilay_clean_docs_perms(corpus="ntsb", part="train", 
-                                  tokens_only=False):
-    data_dir = os.getenv("COHERENCE_DATA", "data")
-    path = os.path.join(
-        data_dir, "barzilay_{}_clean_doc_perm_{}.pkl.gz".format(corpus, part))
-    with gzip.open(path, u"r") as f:
-        docs_perms = pickle.load(f)
-    if tokens_only is True:
-        for doc_perm in docs_perms:
-            doc = doc_perm["gold"]
-            doc_perm["gold"] = [[unicode(t).lower() for t in sent]
-                                for sent in doc_perm["gold"]]
-            doc_perm["perms"] = [[[unicode(t).lower() for t in sent]
-                                 for sent in perm]
-                                 for perm in doc_perm["perms"]]
-            
-    return docs_perms
-
 def get_barzilay_data(corpus=u"apws", part=u"train", 
                       clean=False, format=u"document", include_perms=True,
                       convert_brackets=False):
 
+    if convert_brackets is True and format not in [u"document", u"text"]:
+        __brackets = {
+            u'-LRB-': u'(',
+            u'-lrb-': u'(',
+            u'-RRB-': u')',
+            u'-rrb-': u')',
+            u'-LCB-': u'{',
+            u'-lcb-': u'{',
+            u'-RCB-': u'}',
+            u'-rcb-': u'}',
+            u'-LSB-': u'[',
+            u'-lsb-': u'[',
+            u'-RSB-': u']',
+            u'-rsb-': u']'}
+
     assert format in [u"text", u"xml", u"document", u"tokens", u"trees"]
 
+    if format == u"text":
+        path_format = u""
+    elif format in [u"xml", u"document"]:
+        path_format = u"_xml"
+    elif format == u"tokens":
+        path_format = u"_tokens"
+    elif format == u"trees":
+        path_format = u"_trees"
     fname = u"{}_{}_{}{}.tar.gz".format(
         u"b&l" if clean is False else u"clean",
         corpus,
         part, 
-        u"" if format == u"text" else u"_xml")
+        path_format)
+
     key_name = u"{}{}_{}{}".format(
-        u"" if clean is False else u"clean_",
+        u"b&l_" if clean is False else u"clean_",
         corpus,
         part,
-        u"" if format == u"text" else u"_xml")
+        path_format)
     
     path = os.path.join(os.getenv(u"COHERENCE_DATA", u"."), fname)
 
     def read_document(f):
         return corenlp.read_xml(f, convert_brackets=convert_brackets)
     def read_tokens(f):
-        doc = corenlp.read_xml(f, convert_brackets=convert_brackets)
-        return [[unicode(token).lower() for token in sent]
-                for sent in doc]
+        doc = []
+        for line in f:
+            tokens = line.strip().decode(u"utf-8").split(u" ")
+            tokens = [t.lower() for t in tokens]
+            if convert_brackets is True:
+                tokens = [__brackets.get(t, t) for t in tokens]
+            doc.append(tokens)
+        return doc
+
     def read_parse(f):
-        doc = corenlp.read_xml(f, convert_brackets=convert_brackets)
-        return [sent.parse for sent in doc]
+        doc = []
+        for line in f:
+            t = Tree.fromstring(line.strip().decode(u"utf-8"))
+            if convert_brackets is True:
+                for pos in t.treepositions("leaves"):
+                    t[pos] = __brackets.get(t[pos], t[pos])
+            doc.append(t)
+        return doc
 
     if format == u"text" or format == u"xml":
         reader = None
@@ -603,9 +236,13 @@ def get_barzilay_data(corpus=u"apws", part=u"train",
         reader = read_tokens
     elif format == u"trees":
         reader = read_parse
-
+    if format in [u"xml", u"document"]:
+        file_ext = ".xml"
+    else:
+        file_ext = ".txt"
+    print path
     data = read_tar(
-        path, text_filter=reader, file_ext=".xml", no_perm_num=True)
+        path, text_filter=reader, file_ext=file_ext, no_perm_num=True)
     data = data[key_name]
 
     instances = []
@@ -634,23 +271,24 @@ def extract_barzilay_tar(path_or_url, text_filter=None):
             fileobj1 = open("tmp", "r")
             fileobj = StringIO(fileobj1.read())
             fileobj1.close()
-            os.system("rm rmp")
+            os.system("rm tmp")
 
     data = {}
     with tarfile.open(fileobj=fileobj, mode="r") as tar:
         for tarinfo in tar:
+            
             if "perm" not in os.path.basename(tarinfo.name):
                 continue
-            instance_name, _, perm = os.path.basename(
-                tarinfo.name).split(".")
-            items = os.path.basename(tarinfo.name).split("-")    
-            instance_name = items[0]
+            
+            instance_name = re.search(
+                r"(ntsb\d{4}|apwsE\d{6}\.\d{4})", 
+                tarinfo.name).groups(1)[0]
             
             perm_no = re.search(
                 r"perm-(\d+)", 
                 os.path.basename(tarinfo.name)).groups(1)[0]
             perm_no = int(perm_no)
-            
+
             partition = os.path.split(os.path.dirname(tarinfo.name))[1]
             
             if partition not in data:
@@ -668,7 +306,27 @@ def extract_barzilay_tar(path_or_url, text_filter=None):
             else:
                 data_dict[instance_name][u"perms"].append( 
                     (perm_no, text))
-   
+    import math
+    
+    total = 0
+    for inst, datum in data_dict.items():
+        n_sents = len(datum[u"gold"].split("\n"))
+        max_perms = math.factorial(n_sents)
+        total += len(datum[u"perms"])
+        if max_perms >= 20:
+            if len(datum[u"perms"]) > 20:
+                print "Bad instance : should have 20 perms", inst
+                print "Has {} perms".format(len(datum[u"perms"]))
+                print datum[u"gold"]
+                raise Exception()
+        elif max_perms < 20:
+            if len(datum[u"perms"]) != max_perms:
+                print "Bad instance: should have {} perms".format(max_perms),
+                print "Has {} perms".format(len(datum[u"perms"]))
+                print inst
+                print datum[u"gold"]
+                raise Exception()
+    print "{} instances with {} permutations".format(len(data_dict), total)
     return data
 
 
@@ -704,7 +362,6 @@ def read_tar(tgz_path, text_filter=None, file_ext=".txt", no_perm_num=True):
                     data[instance_name][u"perms"].append(text)
                 else:
                     data[instance_name][u"perms"].append((perm_no, text))
-
     return parts
 
 def write_tar(path, data, file_ext=".txt"):
@@ -826,6 +483,54 @@ def make_xml(text_tgz, xml_tgz, mem=u'7G', n_procs=4):
 
     write_tar(xml_tgz, xml_data, file_ext=".xml")
 
+
+def make_tokens(corpus, clean, part, tokens_tgz):
+    data = get_barzilay_data(
+        corpus=corpus, part=part, clean=clean, format=u"document", 
+        include_perms=True, convert_brackets=False)
+
+    part_name = u"{}_{}_{}_tokens".format(
+        u"b&l" if clean is False else u"clean",
+        corpus,
+        part)
+
+    def cnvrt(doc):
+        doc = [[unicode(t).lower() for t in s]
+               for s in doc]
+        return u'\n'.join(u' '.join(sent) for sent in doc).encode(u"utf-8")
+
+    tokens_data = {part_name: {}}
+    for inst in data:
+        tokens_data[part_name][inst.id] = {
+            u"gold": cnvrt(inst.gold), 
+            u"perms": [(idx, cnvrt(perm)) 
+                       for idx, perm in enumerate(inst.perms, 1)]}
+    write_tar(tokens_tgz, tokens_data, file_ext=".txt")
+
+def make_trees(corpus, clean, part, trees_tgz):
+    data = get_barzilay_data(
+        corpus=corpus, part=part, clean=clean, format=u"document", 
+        include_perms=True, convert_brackets=False)
+
+    part_name = u"{}_{}_{}_trees".format(
+        u"b&l" if clean is False else u"clean",
+        corpus,
+        part)
+
+    def cnvrt(doc):
+        doc = [s.parse._pformat_flat("", "()", False) for s in doc]
+        return u'\n'.join(doc).encode(u"utf-8")
+
+    trees_data = {part_name: {}}
+    for inst in data:
+        trees_data[part_name][inst.id] = {
+            u"gold": cnvrt(inst.gold), 
+            u"perms": [(idx, cnvrt(perm)) 
+                       for idx, perm in enumerate(inst.perms, 1)]}
+    write_tar(trees_tgz, trees_data, file_ext=".txt")
+
+
+
 def make_word_embeddings(path, corpus, clean, max_iters):
     docs_train = get_barzilay_data(corpus=corpus, part=u"train", 
                                    clean=clean, format=u"tokens", 
@@ -890,6 +595,22 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
         data_dir, "b&l_apws_test_xml.tar.gz")
     has_apws_test_xml = os.path.exists(apws_test_xml_tgz)
 
+    apws_train_tokens_tgz = os.path.join(
+        data_dir, "b&l_apws_train_tokens.tar.gz")
+    has_apws_train_tokens = os.path.exists(apws_train_tokens_tgz)
+
+    apws_test_tokens_tgz = os.path.join(
+        data_dir, "b&l_apws_test_tokens.tar.gz")
+    has_apws_test_tokens = os.path.exists(apws_test_tokens_tgz)
+
+    apws_train_trees_tgz = os.path.join(
+        data_dir, "b&l_apws_train_trees.tar.gz")
+    has_apws_train_trees = os.path.exists(apws_train_trees_tgz)
+
+    apws_test_trees_tgz = os.path.join(
+        data_dir, "b&l_apws_test_trees.tar.gz")
+    has_apws_test_trees = os.path.exists(apws_test_trees_tgz)
+
     clean_apws_train_xml_tgz = os.path.join(
         data_dir, "clean_apws_train_xml.tar.gz")
     has_clean_apws_train_xml = os.path.exists(clean_apws_train_xml_tgz)
@@ -921,6 +642,22 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
     ntsb_test_xml_tgz = os.path.join(
         data_dir, "b&l_ntsb_test_xml.tar.gz")
     has_ntsb_test_xml = os.path.exists(ntsb_test_xml_tgz)
+
+    ntsb_train_tokens_tgz = os.path.join(
+        data_dir, "b&l_ntsb_train_tokens.tar.gz")
+    has_ntsb_train_tokens = os.path.exists(ntsb_train_tokens_tgz)
+
+    ntsb_test_tokens_tgz = os.path.join(
+        data_dir, "b&l_ntsb_test_tokens.tar.gz")
+    has_ntsb_test_tokens = os.path.exists(ntsb_test_tokens_tgz)
+
+    ntsb_train_trees_tgz = os.path.join(
+        data_dir, "b&l_ntsb_train_trees.tar.gz")
+    has_ntsb_train_trees = os.path.exists(ntsb_train_trees_tgz)
+
+    ntsb_test_trees_tgz = os.path.join(
+        data_dir, "b&l_ntsb_test_trees.tar.gz")
+    has_ntsb_test_trees = os.path.exists(ntsb_test_trees_tgz)
 
     clean_ntsb_train_xml_tgz = os.path.join(
         data_dir, "clean_ntsb_train_xml.tar.gz")
@@ -957,6 +694,16 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
         "X" if has_ntsb_train_xml else " ")
     print "[{}] Barzilay&Lapata NTSB test xml".format(
         "X" if has_ntsb_test_xml else " ")
+
+    print "[{}] Barzilay&Lapata NTSB train tokens".format(
+        "X" if has_ntsb_train_tokens else " ")
+    print "[{}] Barzilay&Lapata NTSB test tokens".format(
+        "X" if has_ntsb_test_tokens else " ")
+ 
+    print "[{}] Barzilay&Lapata NTSB train trees".format(
+        "X" if has_ntsb_train_trees else " ")
+    print "[{}] Barzilay&Lapata NTSB test trees".format(
+        "X" if has_ntsb_test_trees else " ")
     
     print "[{}] Clean NTSB train txt".format(
         "X" if has_clean_ntsb_train else " ")
@@ -983,7 +730,17 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
         "X" if has_apws_train_xml else " ")
     print "[{}] Barzilay&Lapata APWS test xml".format(
         "X" if has_apws_test_xml else " ")
-    
+
+    print "[{}] Barzilay&Lapata APWS train tokens".format(
+        "X" if has_apws_train_tokens else " ")
+    print "[{}] Barzilay&Lapata APWS test tokens".format(
+        "X" if has_apws_test_tokens else " ")
+ 
+    print "[{}] Barzilay&Lapata APWS train trees".format(
+        "X" if has_apws_train_trees else " ")
+    print "[{}] Barzilay&Lapata APWS test trees".format(
+        "X" if has_apws_test_trees else " ")
+ 
     print "[{}] Clean APWS train txt".format(
         "X" if has_clean_apws_train else " ")
     print "[{}] Clean APWS test txt".format(
@@ -999,7 +756,6 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
     
     print "[{}] Clean APWS Embeddings".format(
         "X" if has_clean_apws_embeddings else " ")
-
 
     if not has_ntsb_train:
         print "Downloading NTSB training data"
@@ -1028,10 +784,33 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
         make_xml(
             ntsb_test_tgz, ntsb_test_xml_tgz, n_procs=n_procs, mem=mem)
 
-    if not has_ntsb_embeddings:
-        print "Learning ntsb word embeddings"
-        print "to:\n\t {} ...".format(ntsb_embeddings) 
-        make_word_embeddings(ntsb_embeddings, "ntsb", False, embed_iters)
+    if not has_ntsb_train_tokens:
+        print "Writing NTSB training data as tokens."
+        print "to:\n\t{} ...".format(ntsb_train_tokens_tgz)
+        make_tokens(u"ntsb", False, u"train", ntsb_train_tokens_tgz)
+
+    if not has_ntsb_test_tokens:
+        print "Writing NTSB testing data as tokens."
+        print "to:\n\t{} ...".format(ntsb_test_tokens_tgz)
+        make_tokens(u"ntsb", False, u"test", ntsb_test_tokens_tgz)
+
+    if not has_ntsb_train_trees:
+        print "Writing NTSB training data as trees."
+        print "to:\n\t{} ...".format(ntsb_train_trees_tgz)
+        make_trees(u"ntsb", False, u"train", ntsb_train_trees_tgz)
+
+    if not has_ntsb_test_trees:
+        print "Writing NTSB testing data as trees."
+        print "to:\n\t{} ...".format(ntsb_test_trees_tgz)
+        make_trees(u"ntsb", False, u"test", ntsb_test_trees_tgz)
+
+
+
+
+#    if not has_ntsb_embeddings:
+#        print "Learning ntsb word embeddings"
+#        print "to:\n\t {} ...".format(ntsb_embeddings) 
+#        make_word_embeddings(ntsb_embeddings, "ntsb", False, embed_iters)
  
     if not has_apws_train:
         print "Downloading APWS training data"
@@ -1060,43 +839,66 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
         make_xml(
             apws_test_tgz, apws_test_xml_tgz, n_procs=n_procs, mem=mem)
 
-    if not has_clean_apws_train:
-        print "Extracting clean APWS training data"
-        print "from: \n\t{}\nto:\n\t{} ...".format(
-            apws_train_tgz, clean_apws_train_tgz)
-        clean_apws_data(apws_train_tgz, clean_apws_train_tgz)
+    if not has_apws_train_tokens:
+        print "Writing APWS training data as tokens."
+        print "to:\n\t{} ...".format(apws_train_tokens_tgz)
+        make_tokens(u"apws", False, u"train", apws_train_tokens_tgz)
 
-    if not has_clean_apws_test:
-        print "Extracting clean APWS testing data"
-        print "from: \n\t{}\nto:\n\t{} ...".format(
-            apws_test_tgz, clean_apws_test_tgz)
-        clean_apws_data(apws_test_tgz, clean_apws_test_tgz)
+    if not has_apws_test_tokens:
+        print "Writing APWS testing data as tokens."
+        print "to:\n\t{} ...".format(apws_test_tokens_tgz)
+        make_tokens(u"apws", False, u"test", apws_test_tokens_tgz)
 
-    if not has_clean_apws_train_xml:
-        print "Processing clean APWS training data w/ CoreNLP pipeline"
-        print "from:\n\t{}\nto:\n\t{} ...".format(
-                clean_apws_train_tgz, clean_apws_train_xml_tgz)
-        make_xml(
-            clean_apws_train_tgz, clean_apws_train_xml_tgz, 
-            n_procs=n_procs, mem=mem)
+    if not has_apws_train_trees:
+        print "Writing APWS training data as trees."
+        print "to:\n\t{} ...".format(apws_train_trees_tgz)
+        make_trees(u"apws", False, u"train", apws_train_trees_tgz)
 
-    if not has_clean_apws_test_xml:
-        print "Processing clean APWS testing data w/ CoreNLP pipeline"
-        print "from:\n\t{}\nto:\n\t{} ...".format(
-                clean_apws_test_tgz, clean_apws_test_xml_tgz)
-        make_xml(
-            clean_apws_test_tgz, clean_apws_test_xml_tgz, 
-            n_procs=n_procs, mem=mem)
+    if not has_apws_test_trees:
+        print "Writing APWS testing data as trees."
+        print "to:\n\t{} ...".format(apws_test_trees_tgz)
+        make_trees(u"apws", False, u"test", apws_test_trees_tgz)
 
-    if not has_apws_embeddings:
-        print "Learning apws word embeddings"
-        print "to:\n\t {} ...".format(apws_embeddings) 
-        make_word_embeddings(apws_embeddings, "apws", False, embed_iters)
-    
-    if not has_clean_apws_embeddings:
-        print "Learning clean apws word embeddings"
-        print "to:\n\t {} ...".format(clean_apws_embeddings) 
-        make_word_embeddings(clean_apws_embeddings, "apws", True, embed_iters)
+
+
+
+#    if not has_clean_apws_train:
+#        print "Extracting clean APWS training data"
+#        print "from: \n\t{}\nto:\n\t{} ...".format(
+#            apws_train_tgz, clean_apws_train_tgz)
+#        clean_apws_data(apws_train_tgz, clean_apws_train_tgz)
+#
+#    if not has_clean_apws_test:
+#        print "Extracting clean APWS testing data"
+#        print "from: \n\t{}\nto:\n\t{} ...".format(
+#            apws_test_tgz, clean_apws_test_tgz)
+#        clean_apws_data(apws_test_tgz, clean_apws_test_tgz)
+#
+#    if not has_clean_apws_train_xml:
+#        print "Processing clean APWS training data w/ CoreNLP pipeline"
+#        print "from:\n\t{}\nto:\n\t{} ...".format(
+#                clean_apws_train_tgz, clean_apws_train_xml_tgz)
+#        make_xml(
+#            clean_apws_train_tgz, clean_apws_train_xml_tgz, 
+#            n_procs=n_procs, mem=mem)
+#
+#    if not has_clean_apws_test_xml:
+#        print "Processing clean APWS testing data w/ CoreNLP pipeline"
+#        print "from:\n\t{}\nto:\n\t{} ...".format(
+#                clean_apws_test_tgz, clean_apws_test_xml_tgz)
+#        make_xml(
+#            clean_apws_test_tgz, clean_apws_test_xml_tgz, 
+#            n_procs=n_procs, mem=mem)
+#
+#    if not has_apws_embeddings:
+#        print "Learning apws word embeddings"
+#        print "to:\n\t {} ...".format(apws_embeddings) 
+#        make_word_embeddings(apws_embeddings, "apws", False, embed_iters)
+#    
+#    if not has_clean_apws_embeddings:
+#        print "Learning clean apws word embeddings"
+#        print "to:\n\t {} ...".format(clean_apws_embeddings) 
+#        make_word_embeddings(clean_apws_embeddings, "apws", True, embed_iters)
 
 if __name__ == "__main__":
     import argparse
