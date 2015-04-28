@@ -1,10 +1,10 @@
 import cohere.data
-from cohere.pprint import pprint as pp
+from cohere import pprint as pp
+from cohere import pprint_X as pp_X
 from cohere.nnet import TokensTransformer, WordEmbeddings, RecurrentNNModel
 import os
 
-def main(corpus="apws"):
-
+def main(corpus="apws", window_size=7):
 
     embed = WordEmbeddings.li_hovy_embeddings(corpus)
     train_dataset = cohere.data.get_barzilay_data(
@@ -25,7 +25,7 @@ def main(corpus="apws"):
     print "The maximum sentence length is {}".format(max_sent_len)
 
     transformer = TokensTransformer(embed, max_sent_len=max_sent_len, 
-        window_size=7)
+        window_size=window_size)
 
     X_iw_train, y_train = transformer.training_window_transform(
         train_dataset.gold)
@@ -33,14 +33,14 @@ def main(corpus="apws"):
         test_dataset)
     X_train_gold, X_train_perm = transformer.testing_window_transform(
         train_dataset)
-
+    pp_X(X_iw_train[:25], transformer)
 
     def callback(nnet, n_iter):
         print n_iter, 
         print "Train Acc.", nnet.score(X_train_gold, X_train_perm),
         print "Test Acc.", nnet.score(X_test_gold, X_test_perm)
     nnet = RecurrentNNModel(embed, max_sent_len=max_sent_len, lam=1., 
-        alpha=.01, batch_size=25, window_size=5, max_iters=10, 
+        alpha=.01, batch_size=25, window_size=window_size, max_iters=10, 
         fit_embeddings=False, fit_callback=callback)
     nnet.fit(X_iw_train, y_train)
 

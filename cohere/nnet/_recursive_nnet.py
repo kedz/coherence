@@ -292,11 +292,11 @@ class RecursiveNNModel(_BaseNNModel):
 
         # Compute the first hidden layer (this is the concatenation of all
         # hidden sentence vectors).
-        a1 = self.params["b1"]
+        a1 = 0
         for i in xrange(win_size):
             W1_si = self.params["W1_s{}".format(i)]
             a1 += T.dot(H_s[i], W1_si)
-        h1 = T.tanh(a1)
+        h1 = T.tanh(a1 + self.params["b1"])
         self._hidden_layers["h1"] = h1
         self._funcs["h1"] = theano.function([X_iw, O_iw], h1)
 
@@ -440,6 +440,7 @@ class RecursiveNNModel(_BaseNNModel):
             name="y_shared",
             borrow=True)
  
+
         X_iw_sym = self.sym_vars["X_iw"]
         O_iw_sym = self.sym_vars["O_iw"]
         y_sym = self.sym_vars["y"]

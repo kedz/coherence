@@ -353,13 +353,13 @@ class RecurrentNNModel(_BaseNNModel):
                 x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
                 h_si = T.switch(
                     T.all(T.eq(x_iw, -1), axis=1, keepdims=True),  
-                    self.params["W_start"][i],
+                    self.params["W_start"][0],  #[i],
                     h_si)
             elif i > cntr_idx:
                 x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
                 h_si = T.switch(
                     T.all(T.eq(x_iw, -1), axis=1, keepdims=True),    
-                    self.params["W_stop"][i - cntr_idx - 1],
+                    self.params["W_stop"][0],  #[i - cntr_idx - 1],
                     h_si)
 
             H_s.append(h_si)
