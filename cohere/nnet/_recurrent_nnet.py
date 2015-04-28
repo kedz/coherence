@@ -469,3 +469,63 @@ class RecurrentNNModel(_BaseNNModel):
                 correct += 1
             total += 1
         return float(correct) / max(total, 1)
+
+    def score_slow(self, X_gold, X_perm):
+        print "sharing data"
+        X_ten_shared_g, M_ten_shared_g, doc_lens_shared_g = self._make_shared(
+            X_gold)
+        X_ten_shared_p, M_ten_shared_p, doc_lens_shared_p = self._make_shared(
+            X_perm) 
+        import time
+        start = time.time()
+        print "computing lp gold"
+        gold_lp = self._lp_tensor_docs(
+            X_ten_shared_g, M_ten_shared_g, doc_lens_shared_g)
+        print "computing lp perm"
+        perm_lp = self._lp_tensor_docs(
+            X_ten_shared_p, M_ten_shared_p, doc_lens_shared_p)
+        acc = np.sum(gold_lp > perm_lp) / float(gold_lp.shape[0])
+        print time.time() - start
+        return acc
+
+    def _make_shared(self, X):
+        
+        doc_lens = np.array([x.shape[0] for x in X], dtype="int32")
+        max_doc_len = np.max(doc_lens)
+        max_docs = len(X)
+        n_cols = self.window_size * self.max_sent_len
+        X_tensor = np.ones((max_docs, max_doc_len, n_cols), dtype="int32") * -1
+        M_tensor = np.ones((max_docs, max_doc_len, n_cols), dtype="int32") * -1
+
+        
+        for i, X_iw in enumerate(X):    
+            if X_iw.shape[1] != n_cols:
+                raise Exception(
+                    "{}th element of X".format(i) + \
+                    " has invalid number of columns {}, should be {}".format(
+                        X_iw.shape[1], n_cols))
+            X_tensor[i, 0 : doc_lens[i], :] = X_iw
+            M_tensor[i, 0 : doc_lens[i], :] = self._mask(X_iw)
+        
+        X_ten_shared = theano.shared(X_tensor, name="X_tensor", borrow=True)
+        M_ten_shared = theano.shared(M_tensor, name="X_tensor", borrow=True)
+        doc_lens_shared = theano.shared(doc_lens, name="doc_lens")
+        return X_ten_shared, M_ten_shared, doc_lens_shared
+        
+    def _lp_tensor_docs(self, X_ten_shared, M_ten_shared, doc_lens_shared):
+        
+        index = T.scalar(dtype='int32')  # index to a [mini]batch
+        X_iw_sym = self.sym_vars["X_iw"]
+        M_iw_sym = self.sym_vars["M_iw"]
+        doc_lp = theano.function(
+            inputs=[index],
+            outputs=[T.sum(T.log(self._nn_output[:,1]))],
+            givens={
+                X_iw_sym: X_ten_shared[
+                        index, 0 : doc_lens_shared[index]],        
+                M_iw_sym: M_ten_shared[
+                        index, 0 : doc_lens_shared[index]],
+                }
+            )
+        max_docs = X_ten_shared.get_value(borrow=True).shape[0]
+        return np.array([doc_lp(i) for i in xrange(max_docs)])
