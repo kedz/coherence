@@ -84,6 +84,62 @@ class TokensTransformer(BaseEstimator):
             row_offset += doc_len
         return X_iw
 
+    def training_window_transform2(self, docs):
+        docs = self._make_docs_safe(docs)
+        
+        pad_size = self.window_size / 2
+        max_toks = self.max_sent_len
+        pad_sym = -1 
+
+        n_rows = np.sum([len(doc) * 2 for doc in docs])
+        X_iw = np.ones((n_rows, self.max_sent_len * self.window_size), 
+                       dtype=np.int32) * pad_sym
+        y = np.zeros((n_rows,), dtype=np.int32)
+
+        # Transform doc to word index sentence matrix and operation sentence
+        # matrix.
+        X_is = self.transform(docs)
+
+        row_offset = 0
+        input_row_offset = 0
+        for idx, doc in enumerate(docs):
+            doc_len = len(doc)
+            X_is_doc = X_is[input_row_offset : input_row_offset + doc_len]
+            for i in xrange(0, doc_len):
+                y[row_offset + i * 2] = 1
+                y[row_offset + i * 2 + 1] = 0
+
+                for pos, k in enumerate(xrange(i-pad_size, i+pad_size+1)):
+                    if k < 0:
+                        pass
+                        #X_iw[row_offset + i, pos * max_toks] = start_sym
+                    elif k >= doc_len:
+                        pass
+                        #X_iw[row_offset + i, pos * max_toks] = stop_sym
+                    else:
+                        if pos == pad_size:
+                            # selecting the focus which is j.
+                            l1 = i
+                            rand = [neg_pos for neg_pos 
+                                    in xrange(i-pad_size-1, i+pad_size+2)
+                                    if neg_pos != i and \
+                                        neg_pos >= 0 and neg_pos < doc_len]
+                            np.random.shuffle(rand)
+                            l2 = rand[0]
+                        else:
+                            # select the left or right sentences (k).
+                            l1 = k
+                            l2 = k
+                        X_iw[row_offset + i * 2, 
+                             pos * max_toks:(pos+1)*max_toks] = X_is_doc[l1]
+                        X_iw[row_offset + i * 2 + 1,
+                             pos * max_toks:(pos+1)*max_toks] = X_is_doc[l2]
+                    
+            row_offset += doc_len * 2
+            input_row_offset += doc_len
+        return X_iw, y
+
+
 
     def training_window_transform(self, docs):
         docs = self._make_docs_safe(docs)
