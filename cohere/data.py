@@ -619,6 +619,22 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
         data_dir, "clean_apws_test_xml.tar.gz")
     has_clean_apws_test_xml = os.path.exists(clean_apws_test_xml_tgz)
 
+    clean_apws_train_tokens_tgz = os.path.join(
+        data_dir, "clean_apws_train_tokens.tar.gz")
+    has_clean_apws_train_tokens = os.path.exists(clean_apws_train_tokens_tgz)
+
+    clean_apws_test_tokens_tgz = os.path.join(
+        data_dir, "clean_apws_test_tokens.tar.gz")
+    has_clean_apws_test_tokens = os.path.exists(clean_apws_test_tokens_tgz)
+
+    clean_apws_train_trees_tgz = os.path.join(
+        data_dir, "clean_apws_train_trees.tar.gz")
+    has_clean_apws_train_trees = os.path.exists(clean_apws_train_trees_tgz)
+
+    clean_apws_test_trees_tgz = os.path.join(
+        data_dir, "clean_apws_test_trees.tar.gz")
+    has_clean_apws_test_trees = os.path.exists(clean_apws_test_trees_tgz)
+
     ntsb_train_tgz = os.path.join(
         data_dir, "b&l_ntsb_train.tar.gz")
     has_ntsb_train = os.path.exists(ntsb_train_tgz)
@@ -751,6 +767,18 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
     print "[{}] Clean APWS test xml".format(
         "X" if has_clean_apws_test_xml else " ")
 
+    print "[{}] clean APWS train tokens".format(
+        "X" if has_clean_apws_train_tokens else " ")
+    print "[{}] clean APWS test tokens".format(
+        "X" if has_clean_apws_test_tokens else " ")
+ 
+    print "[{}] clean APWS train trees".format(
+        "X" if has_clean_apws_train_trees else " ")
+    print "[{}] clean APWS test trees".format(
+        "X" if has_clean_apws_test_trees else " ")
+ 
+
+
     print "[{}] APWS Embeddings".format(
         "X" if has_apws_embeddings else " ")
     
@@ -859,37 +887,57 @@ def main(n_procs=2, mem="8G", embed_iters=1000):
         print "to:\n\t{} ...".format(apws_test_trees_tgz)
         make_trees(u"apws", False, u"test", apws_test_trees_tgz)
 
+    if not has_clean_apws_train:
+        print "Extracting clean APWS training data"
+        print "from: \n\t{}\nto:\n\t{} ...".format(
+            apws_train_tgz, clean_apws_train_tgz)
+        clean_apws_data(apws_train_tgz, clean_apws_train_tgz)
+
+    if not has_clean_apws_test:
+        print "Extracting clean APWS testing data"
+        print "from: \n\t{}\nto:\n\t{} ...".format(
+            apws_test_tgz, clean_apws_test_tgz)
+        clean_apws_data(apws_test_tgz, clean_apws_test_tgz)
+
+    if not has_clean_apws_train_xml:
+        print "Processing clean APWS training data w/ CoreNLP pipeline"
+        print "from:\n\t{}\nto:\n\t{} ...".format(
+                clean_apws_train_tgz, clean_apws_train_xml_tgz)
+        make_xml(
+            clean_apws_train_tgz, clean_apws_train_xml_tgz, 
+            n_procs=n_procs, mem=mem)
+
+    if not has_clean_apws_test_xml:
+        print "Processing clean APWS testing data w/ CoreNLP pipeline"
+        print "from:\n\t{}\nto:\n\t{} ...".format(
+                clean_apws_test_tgz, clean_apws_test_xml_tgz)
+        make_xml(
+            clean_apws_test_tgz, clean_apws_test_xml_tgz, 
+            n_procs=n_procs, mem=mem)
+
+    if not has_clean_apws_train_tokens:
+        print "Writing clean APWS training data as tokens."
+        print "to:\n\t{} ...".format(clean_apws_train_tokens_tgz)
+        make_tokens(u"apws", True, u"train", clean_apws_train_tokens_tgz)
+
+    if not has_clean_apws_test_tokens:
+        print "Writing clean APWS testing data as tokens."
+        print "to:\n\t{} ...".format(clean_apws_test_tokens_tgz)
+        make_tokens(u"apws", True, u"test", clean_apws_test_tokens_tgz)
+
+    if not has_clean_apws_train_trees:
+        print "Writing clean APWS training data as trees."
+        print "to:\n\t{} ...".format(clean_apws_train_trees_tgz)
+        make_trees(u"apws", True, u"train", clean_apws_train_trees_tgz)
+
+    if not has_clean_apws_test_trees:
+        print "Writing clean APWS testing data as trees."
+        print "to:\n\t{} ...".format(clean_apws_test_trees_tgz)
+        make_trees(u"apws", True, u"test", clean_apws_test_trees_tgz)
 
 
 
-#    if not has_clean_apws_train:
-#        print "Extracting clean APWS training data"
-#        print "from: \n\t{}\nto:\n\t{} ...".format(
-#            apws_train_tgz, clean_apws_train_tgz)
-#        clean_apws_data(apws_train_tgz, clean_apws_train_tgz)
-#
-#    if not has_clean_apws_test:
-#        print "Extracting clean APWS testing data"
-#        print "from: \n\t{}\nto:\n\t{} ...".format(
-#            apws_test_tgz, clean_apws_test_tgz)
-#        clean_apws_data(apws_test_tgz, clean_apws_test_tgz)
-#
-#    if not has_clean_apws_train_xml:
-#        print "Processing clean APWS training data w/ CoreNLP pipeline"
-#        print "from:\n\t{}\nto:\n\t{} ...".format(
-#                clean_apws_train_tgz, clean_apws_train_xml_tgz)
-#        make_xml(
-#            clean_apws_train_tgz, clean_apws_train_xml_tgz, 
-#            n_procs=n_procs, mem=mem)
-#
-#    if not has_clean_apws_test_xml:
-#        print "Processing clean APWS testing data w/ CoreNLP pipeline"
-#        print "from:\n\t{}\nto:\n\t{} ...".format(
-#                clean_apws_test_tgz, clean_apws_test_xml_tgz)
-#        make_xml(
-#            clean_apws_test_tgz, clean_apws_test_xml_tgz, 
-#            n_procs=n_procs, mem=mem)
-#
+
 #    if not has_apws_embeddings:
 #        print "Learning apws word embeddings"
 #        print "to:\n\t {} ...".format(apws_embeddings) 
