@@ -449,7 +449,7 @@ class RecursiveNNModel(_BaseNNModel):
         for param in self._reg_params:
             reg += (param**2).sum() 
 
-        reg = reg * self.lam * self.window_size / X_iw.shape[0]
+        reg = reg * self.lam * self.window_size / float(X_iw.shape[0])
         cost = self._nll + reg  
         gtheta = T.grad(cost, self.theta)
 
