@@ -99,6 +99,7 @@ class RecurrentNNModel(_BaseNNModel):
             (word_dim, word_dim))
         V_rec.name = "V_rec"
         self.params[V_rec.name] = V_rec
+        self._reg_params.append(V_rec)
         
         if initializers.get("V_rec", None) is None:
             V_rec_init = np.random.uniform(
@@ -126,7 +127,7 @@ class RecurrentNNModel(_BaseNNModel):
         
         next_pointer = current_pointer + word_dim
         h0 = self.theta[current_pointer:next_pointer].reshape(
-            (word_dim,))
+            (1, word_dim,))
         h0.name = "h0"
         self.params[h0.name] = h0   
         
@@ -151,6 +152,7 @@ class RecurrentNNModel(_BaseNNModel):
                 (word_dim, self.hidden_dim))
             W1_s.name = name
             self.params[W1_s.name] = W1_s
+            self._reg_params.append(W1_s)
             
             if initializers.get(name, None) is None:
                 W1_s_init = np.random.uniform(
@@ -182,6 +184,7 @@ class RecurrentNNModel(_BaseNNModel):
             (self.hidden_dim, 1))
         W2.name="W2"
         self.params[W2.name] = W2
+        self._reg_params.append(W2)
         
         if initializers.get("W2", None) is None:
             W2_init = np.random.uniform(
@@ -369,7 +372,8 @@ class RecurrentNNModel(_BaseNNModel):
  
     def step_mask(self, x_t, m_t, h_tm1):
         h_t_unmasked = self.step(x_t, h_tm1)
-        h_t = m_t * h_t_unmasked + (1 - m_t) * h_tm1
+        #h_t = m_t * h_t_unmasked + (1 - m_t) * h_tm1
+        h_t = T.switch(T.eq(m_t, 1), h_t_unmasked, h_tm1)
         return h_t, theano.scan_module.until(T.all(T.eq(m_t, 0)))
     
     def step(self, x_t, h_tm1):
@@ -407,9 +411,9 @@ class RecurrentNNModel(_BaseNNModel):
         for param in self._reg_params:
             reg += (param**2).sum()
 
-        reg = reg * self.lam * self.window_size / X_iw.shape[0]
+        reg *= self.lam * self.window_size / float(X_iw.shape[0])
         cost = self._nll + reg
-        gtheta = T.grad(cost, self.theta)
+        gtheta = T.grad(cost, wrt=self.theta)
 
         if self.update_method == "adagrad":
             # diagonal adagrad update
