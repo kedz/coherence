@@ -24,11 +24,12 @@ def pprint(obj):
     elif isinstance(obj, cohere.data.CoherenceInstance):
         print _print_str_instance(obj).encode(u"utf-8")
 
-def pprint_X(X, transformer, width=80):
+def pprint_X(X, transformer, y=None, width=80):
     
     word_dim = transformer.embeddings.W.shape[1]
     win_size = transformer.window_size
     max_words = transformer.max_sent_len
+
     win_width = int(width - 5 * (win_size -1)) / int(win_size)
 
     if len(X.shape) == 1:
@@ -38,7 +39,7 @@ def pprint_X(X, transformer, width=80):
             "X columns {} not consistent with transfomer {}".format(
                 X.shape[1], max_words * win_size))
 
-    for x in X:
+    for n_row, x in enumerate(X):
         cols = []
         for k in xrange(win_size):
             words = []
@@ -48,6 +49,10 @@ def pprint_X(X, transformer, width=80):
             line = u' '.join(words)[:win_width]
             line += u' ' * (win_width - len(line))
             cols.append(line)
-        print u" \u22EF  ".join(cols).encode(u"utf-8")    
-
+        row = u" \u22EF  ".join(cols)   
+        if len(row) < width:
+            row += u" " * (width - len(row) - 1)
+        if y is not None:
+            row = row[:-5] + u" y={}".format(y[n_row])        
+        print row.encode(u"utf-8")
 
