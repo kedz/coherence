@@ -54,6 +54,14 @@ def get_averaged_model(params, embed, max_sent_len, max_ops_len, max_folds,
         thetas_sum += nnet.theta.get_value(borrow=True)
         tot_models += 1
     thetas_avg = thetas_sum / float(tot_models)
+    nnet = RecursiveNNModel(embed, max_sent_len=max_sent_len, 
+                max_sent_ops=max_sent_ops,
+                alpha=params["lr"],
+                lam=params["lam"], 
+                window_size=int(params["win"]))
+
+
+
     nnet.theta.set_value(thetas_avg)
     return nnet
 

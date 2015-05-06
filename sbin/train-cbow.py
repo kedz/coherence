@@ -33,30 +33,16 @@ def result2path(dir, result):
 def main(output_model_dir, corpus, clean):
     print "clean?", clean   
     print "Loading training data..."
-    D_P = cohere.data.get_barzilay_data(
+    dataset = cohere.data.get_barzilay_data(
         corpus=corpus, part="train", format="tokens", clean=clean, 
-        convert_brackets=False)
+        convert_brackets=True)
     
-    D = [dp["gold"] for dp in D_P]
+    embed = WordEmbeddings.li_hovy_embeddings(corpus)
 
-    print "Loading testing data..."
-    D_P_test = cohere.data.get_barzilay_data(
-        corpus=corpus, part="test", format="tokens", clean=clean, 
-        convert_brackets=False)
-    all_docs = [dp["gold"] for dp in D_P] + [dp["gold"] for dp in D_P_test]
-
-    embed_path = os.path.join(
-        os.getenv("COHERENCE_DATA", "data"), 
-        "{}_embeddings.txt.gz".format(corpus))
-    print "Reading word embeddings from {} ...".format(embed_path)
-    embed = WordEmbeddings.from_file(embed_path)
+    max_sent_len = TokensTransformer.get_max_sent_len(dataset.gold)
+    n_data = len(dataset)
     
-    max_sent_len = TokensTransformer.get_max_sent_len(all_docs)
-
     results = []
-
-    #max_sent_len = 115
-    n_data = len(D)
 
     max_folds = 10
     max_iters = 20
@@ -77,29 +63,24 @@ def main(output_model_dir, corpus, clean):
         print "batch size:", batch_size, "lr:", lr
 
 
+
         
         transformer = TokensTransformer(
             embed, max_sent_len=max_sent_len, window_size=win_size)
 
         folds = KFold(n_data, n_folds=max_folds)
         for n_fold, (I_train, I_dev) in enumerate(folds, 1):
-            D_train = [D[i] for i in I_train]
-            D_P_dev = [D_P[i] for i in I_dev]
-            
-            X_iw_gold = []
-            X_iw_perm = []
-            for d_P in D_P_dev:
-                x_iw_gold = transformer.window_transform([d_P[u"gold"]])
-                for p in d_P[u"perms"]:
-                    x_iw_perm =transformer.window_transform([p])
-                    X_iw_gold.append(x_iw_gold)
-                    X_iw_perm.append(x_iw_perm)
-            X_iw, y = transformer.training_window_transform(D_train)
+            train_data = dataset[I_train]
+            dev_data = dataset[I_dev]
+                 
+            X_iw, y = transformer.training_window_transform(train_data.gold)
+            X_dev_gold, X_dev_perm = transformer.testing_window_transform(
+                dev_data)
 
             def fit_callback(nnet, n_iter):
                 avg_win_err = -1.
                 dev_avg_win_err = -1.
-                dev_acc = nnet.score(X_iw_gold, X_iw_perm)
+                dev_acc = nnet.score(X_dev_gold, X_dev_perm)
                 result = {"fold": n_fold, "model no.": n_setting,
                           "iter": n_iter,
                           "train err": avg_win_err,
@@ -128,6 +109,11 @@ def main(output_model_dir, corpus, clean):
         print "TOP 5"
         df = make_df(results)
         print df.tail(5)
+    
+    test_data = cohere.data.get_barzilay_data(
+        corpus=corpus, part="test", format="tokens", clean=clean, 
+        convert_brackets=False)
+
 
     best_params = df.tail(1).to_dict(orient="records")[0]
     thetas_sum = 0
@@ -139,19 +125,15 @@ def main(output_model_dir, corpus, clean):
     thetas_avg = thetas_sum / float(max_folds)
     nnet.theta.set_value(thetas_avg)
 
+    max_sent_len = TokensTransformer.get_max_sent_len(test_data.gold)
     transformer = TokensTransformer(
         embed,
         max_sent_len=max_sent_len, window_size=int(best_params["win"])) 
-    X_iw_gold = []
-    X_iw_perm = []
-    for d_P in D_P_test:
-        x_iw_gold = transformer.window_transform([d_P[u"gold"]])
-        for p in d_P[u"perms"]:
-            x_iw_perm =transformer.window_transform([p])
-            X_iw_gold.append(x_iw_gold)
-            X_iw_perm.append(x_iw_perm)
+    X_test_gold, X_test_perm = transformer.testing_window_transform(
+            test_data)
 
-    test_acc = nnet.score(X_iw_gold, X_iw_perm)
+
+    test_acc = nnet.score(X_test_gold, X_test_perm)
     print "Best Model"
     print df.tail(1)
     fname = "results_clean.csv" if clean else "results.csv"
