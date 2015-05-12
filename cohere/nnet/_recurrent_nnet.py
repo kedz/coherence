@@ -41,7 +41,7 @@ class RecurrentNNModel(_BaseNNModel):
         # If using trainable start/stop sentences, allocate memory.
         # NOTE: if window size is 5, there will be two distinct start
         # vectors and two distinct stop vectors.
-        n_recurrent_params += (self.window_size - 1) * word_dim
+        n_recurrent_params += 2 * word_dim   #(self.window_size - 1) * word_dim
         
         print "n_recurrent_params:", n_recurrent_params
         
@@ -211,14 +211,16 @@ class RecurrentNNModel(_BaseNNModel):
         current_pointer = next_pointer
     
         # W_start (window_size / 2, word_dim)
-        next_pointer = current_pointer + self.window_size / 2 * word_dim
+        #next_pointer = current_pointer + self.window_size / 2 * word_dim
+        next_pointer = current_pointer + word_dim
         W_start = self.theta[current_pointer:next_pointer].reshape(
-                (self.window_size / 2, word_dim))
+                (1, word_dim))
+                #(self.window_size / 2, word_dim))
         W_start.name = "W_start"
         self.params[W_start.name] = W_start
 
         if initializers.get("W_start", None) is None:
-            W_start_init = np.zeros((self.window_size / 2, word_dim),
+            W_start_init = np.zeros((1, word_dim),
                                     dtype=theano.config.floatX)
         else:
             W_start_init = initializers.get("W_start")
@@ -226,14 +228,15 @@ class RecurrentNNModel(_BaseNNModel):
         current_pointer = next_pointer
 
         # W_stop (window_size / 2, word_dim)
-        next_pointer = current_pointer + self.window_size / 2 * word_dim
+        next_pointer = current_pointer + word_dim
+        #next_pointer = current_pointer + self.window_size / 2 * word_dim
         W_stop = self.theta[current_pointer:next_pointer].reshape(
-                (self.window_size / 2, word_dim))
+                (1, word_dim))
         W_stop.name = "W_stop"
         self.params[W_stop.name] = W_stop
 
         if initializers.get("W_stop", None) is None:
-            W_stop_init = np.zeros((self.window_size / 2, word_dim),
+            W_stop_init = np.zeros((1, word_dim),
                                    dtype=theano.config.floatX)
         else:
             W_stop_init = initializers.get("W_stop")
@@ -268,6 +271,8 @@ class RecurrentNNModel(_BaseNNModel):
                 borrow=True)
 
     def _build_network(self):
+
+        self._my_init()
         max_sent_len = self.max_sent_len
         win_size = self.window_size
 
@@ -340,30 +345,46 @@ class RecurrentNNModel(_BaseNNModel):
             [X_iw, M_iw], M_T) 
 
         h0_block = T.alloc(self.params["h0"], X.shape[1], X.shape[2])
+        start_block = T.alloc(self.params["W_start"], X.shape[1], X.shape[2])
+        stop_block = T.alloc(self.params["W_stop"], X.shape[1], X.shape[2])
 
         H_s = []
         cntr_idx = win_size / 2 
         for i in xrange(win_size):
+
+            if i < cntr_idx:
+                x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
+                init_step = T.switch(
+                    T.all(T.eq(x_iw, -1), axis=1, keepdims=True),  
+                    start_block, h0_block)
+            elif i > cntr_idx:
+                x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
+                init_step = T.switch(
+                    T.all(T.eq(x_iw, -1), axis=1, keepdims=True),  
+                    stop_block, h0_block)
+            else:
+                init_step = h0_block
+
+
+                #h_si = switch * T.alloc(self.params["W_start"], X_iw.shape[0], X.shape[2]) + (1 - switch) * h_si
+                    #T.alloc(self.params["W_start"], X_iw.shape[0], X.shape[2]),  #[i],
+                    #h_si)
+                #self.switch = switch
+
             h_si, _ = theano.scan(
                 fn=self.step_mask,
                 sequences=[
                     {"input": X,   "taps":[i * max_sent_len]}, 
                     {"input": M_T, "taps":[i * max_sent_len]},], 
-                outputs_info=h0_block,
+                outputs_info=init_step,
                 n_steps=max_sent_len)
             h_si = h_si[-1]
-            if i < cntr_idx:
-                x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
-                h_si = T.switch(
-                    T.all(T.eq(x_iw, -1), axis=1, keepdims=True),  
-                    self.params["W_start"][0],  #[i],
-                    h_si)
-            elif i > cntr_idx:
-                x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
-                h_si = T.switch(
-                    T.all(T.eq(x_iw, -1), axis=1, keepdims=True),    
-                    self.params["W_stop"][0],  #[i - cntr_idx - 1],
-                    h_si)
+           #             elif i > cntr_idx:
+           #     x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
+           #     h_si = T.switch(
+           #         T.all(T.eq(x_iw, -1), axis=1, keepdims=True),    
+           #         self.params["W_stop"][0],  #[i - cntr_idx - 1],
+           #         h_si)
 
             H_s.append(h_si)
             self._hidden_layers["h_s{}".format(i)] = h_si
@@ -372,9 +393,9 @@ class RecurrentNNModel(_BaseNNModel):
  
     def step_mask(self, x_t, m_t, h_tm1):
         h_t_unmasked = self.step(x_t, h_tm1)
-        #h_t = m_t * h_t_unmasked + (1 - m_t) * h_tm1
-        h_t = T.switch(T.eq(m_t, 1), h_t_unmasked, h_tm1)
-        return h_t, theano.scan_module.until(T.all(T.eq(m_t, 0)))
+        h_t = m_t * h_t_unmasked + (1 - m_t) * h_tm1
+        #h_t = T.switch(T.eq(m_t, 1), h_t_unmasked, h_tm1)
+        return h_t #, theano.scan_module.until(T.all(T.eq(m_t, 0)))
     
     def step(self, x_t, h_tm1):
         W_rec = self.params["W_rec"]
@@ -434,6 +455,7 @@ class RecurrentNNModel(_BaseNNModel):
         index = T.scalar(dtype='int32')  # index to a [mini]batch
         train_model = theano.function(
             inputs=[index],
+            #outputs=[cost, self._nll, reg, self._hidden_layers["h_s0"], theano.grad(cost, wrt=self.params["W_start"]), self.switch],
             outputs=[cost, self._nll, reg],
             updates=updates,
             givens={
@@ -449,12 +471,13 @@ class RecurrentNNModel(_BaseNNModel):
 
         batch_nll = np.zeros((n_batches,))
         for n_iter in xrange(1, self.max_iters + 1):
-            
+           
             for i in xrange(n_batches):
                 cost, nll, reg = train_model(i)
-                batch_nll[i] = nll               
+                batch_nll[i] = nll   
             if self.fit_callback is not None:
-                self.fit_callback(self, n_iter)
+                self.fit_callback(self, n_iter, np.mean(batch_nll))
+
             else:
                 print n_iter, "avg batch nll", np.mean(batch_nll)
 
@@ -462,6 +485,78 @@ class RecurrentNNModel(_BaseNNModel):
         M_iw = np.ones_like(X_iw)
         M_iw[X_iw == -1] = 0
         return M_iw
+
+
+    def _my_init(self):
+
+        X_is = T.imatrix("X_is")
+        M_is = T.imatrix("M_is")
+        X = self.params["E"][X_is] 
+        X = X.dimshuffle(1,0,2)
+        
+        M_T = M_is.dimshuffle(1,0).reshape((X.shape[0], X.shape[1], 1))
+ 
+
+        h0_block = T.alloc(self.params["h0"], X.shape[1], X.shape[2])
+
+        h_si, _ = theano.scan(
+            fn=self.step_mask,
+            sequences=[X, M_T],
+            outputs_info=h0_block,
+            n_steps=self.max_sent_len)
+        h_si = h_si[-1]
+           #             elif i > cntr_idx:
+           #     x_iw = X_iw[:,i * max_sent_len : (i+1) * max_sent_len]
+           #     h_si = T.switch(
+           #         T.all(T.eq(x_iw, -1), axis=1, keepdims=True),    
+           #         self.params["W_stop"][0],  #[i - cntr_idx - 1],
+           #         h_si)
+
+        self._doc_sent_layers = theano.function([X_is, M_is], h_si)
+
+    def _score_index_doc(self, X_is):
+        H = self._doc_sent_layers(X_is, self._mask(X_is))
+        win_pad = self.window_size / 2
+        word_dim = self.embeddings.W.shape[1]
+
+        D = np.zeros((H.shape[0], self.window_size * word_dim), 
+            dtype="float64")
+
+        
+
+        for i in xrange(H.shape[0]):
+            for j, k in enumerate(range(i-win_pad, i + 1 + win_pad)):
+                if k < 0:
+                    vec = self.params["W_start"].eval()
+                elif k >= H.shape[0]:
+                    vec = self.params["W_stop"].eval()
+                else:
+                    vec = H[k]
+                D[i,j * word_dim:(j+1) * word_dim] = vec
+
+        A1 = sum([np.dot(D[:,k * word_dim : (k + 1) * word_dim],
+                     self.params["W1_s{}".format(k)].eval()) 
+                  for k in xrange(self.window_size)])
+
+        H1 = np.tanh(A1 + self.params["b1"].eval())
+        A2 = np.dot(H1, self.params["W2"].eval()) + self.params["b2"].eval()
+        h2 = 1 / (1. + np.exp(-A2))
+        return np.sum(np.log(h2))
+        
+
+    def score_dataset(self, dataset, transformer):
+        correct = 0
+        total = 0
+        for inst in dataset:
+            X_gold = transformer.transform([inst.gold])
+            gold_lp = self._score_index_doc(X_gold)
+            for perm in inst.perms:
+                X_perm = transformer.transform([perm])
+                perm_lp = self._score_index_doc(X_perm)
+                if gold_lp > perm_lp:
+                    correct += 1
+                total += 1
+        return correct / float(max(1, total))
 
     def score(self, X_gold, X_perm):
         correct = 0
