@@ -33,7 +33,7 @@ class TokensTransformer(BaseEstimator):
         n_sents = np.sum([len(doc) for doc in docs])
         pad_sym = -1 #self.embeddings.get_index("__PAD__")
         X_idx_sent = pad_sym * np.ones(
-            (n_sents, self.max_sent_len), dtype=np.int64)
+            (n_sents, self.max_sent_len), dtype=np.int32)
         row_offset = 0
         for doc in docs:
             self._transform_single_doc(X_idx_sent, row_offset, doc)
