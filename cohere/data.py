@@ -9,7 +9,6 @@ import cPickle as pickle
 import random
 import re
 import urllib2
-import gensim
 import collections
 from nltk.tree import Tree
 
