@@ -1,24 +1,23 @@
 from nltk.tree import Tree
 import numpy as np
 from sklearn.base import BaseEstimator
-
+from cohere.data import CoherenceData
 
 class TokensTransformer(BaseEstimator):
-    def __init__(self, embeddings, window_size=3, max_sent_len=150):
+    def __init__(self, embeddings, window_size=3):
         self.embeddings = embeddings
         self.window_size = window_size
-        self.max_sent_len = max_sent_len
 
-    @classmethod        
-    def get_max_sent_len(self, docs):
-        docs = self._make_docs_safe(docs)
-
+    def _get_max_sent_len(self, dataset):
         max_sent = 0
-        for doc in docs:
+        for doc in dataset.gold:
             for sent in doc:
                 max_sent = max(max_sent, len(sent))
         return max_sent
-    
+
+
+
+
     @classmethod
     def _make_docs_safe(self, docs):
         assert isinstance(docs, list) or isinstance(docs, tuple)
@@ -27,211 +26,96 @@ class TokensTransformer(BaseEstimator):
             docs = [docs]
         return docs
 
-    def transform(self, docs):
-        docs = self._make_docs_safe(docs)
+    def transform_gold(self, dataset):
+        if not isinstance(dataset, CoherenceData):
+            raise Exception(u"Argument dataset must be a CoherenceData object")
+        if not dataset.format == u"tokens":
+            raise Exception(u"Argument dataset must be of format 'tokens'.")
 
-        n_sents = np.sum([len(doc) for doc in docs])
-        pad_sym = -1 #self.embeddings.get_index("__PAD__")
-        X_idx_sent = pad_sym * np.ones(
-            (n_sents, self.max_sent_len), dtype=np.int32)
-        row_offset = 0
-        for doc in docs:
-            self._transform_single_doc(X_idx_sent, row_offset, doc)
-            row_offset += len(doc)
-        return X_idx_sent
+        max_sent = self._get_max_sent_len(dataset)
+
+        I = np.cumsum(
+            np.array(
+                [0] + [len(doc) for doc in dataset.gold],
+                dtype=u"int32"))
+        X = -1 * np.ones((I[-1], max_sent), dtype="int32")       
+        
+        for i, doc in enumerate(dataset.gold):
+            self._transform_single_doc(X, I[i], doc)
+
+        return X, I
+
+    def transform_test(self, dataset):
+        if not isinstance(dataset, CoherenceData):
+            raise Exception(u"Argument dataset must be a CoherenceData object")
+        if not dataset.format == u"tokens":
+            raise Exception(u"Argument dataset must be of format 'tokens'.")
+
+        max_sent = self._get_max_sent_len(dataset)
+        
+        sent2index = {}
+        sents = []
+        P = []
+        I = [0]
+        offset = 0
+        sent_offset = 0
+        for inst in dataset:
+            gold_off = offset
+            offset += 1
+            I.append(len(inst.gold))
+            for sent in inst.gold:
+                as_tuple = tuple(sent)
+                if as_tuple not in sent2index:
+                    sent2index[as_tuple] = sent_offset
+                    sent_offset += 1
+                    sents.append(as_tuple)
+           
+            for perm in inst.perms:
+                P.append([gold_off, offset])
+                I.append(len(perm))
+                offset += 1
+                for sent in perm:
+                    as_tuple = tuple(sent)
+                    if as_tuple not in sent2index:
+                        sent2index[as_tuple] = sent_offset
+                        sent_offset += 1
+                        sents.append(as_tuple)
+
+        n_sents = len(sents)
+        X = np.ones((n_sents, max_sent), dtype="int32") * -1
+        self._transform_single_doc(X, 0, sents)
+        I = np.cumsum(np.array(I), dtype="int32")
+        P = np.array(P, dtype="int32") 
+
+        C = np.ones((I[-1], self.window_size), dtype="int32") * -1
+        offset = 0
+        pad = self.window_size / 2
+        for inst in dataset:
+            gold = [sent2index[tuple(sent)] for sent in inst.gold]
+            dlen = len(gold)
+            for i in xrange(dlen): 
+                for pos, k in enumerate(xrange(i - pad, i + 1 + pad)):
+                    if k >= 0 and k < dlen:
+                        C[offset, pos] = gold[k]
+                offset += 1
+            for perm_doc in inst.perms:
+                perm = [sent2index[tuple(sent)] for sent in perm_doc]
+                plen = len(perm)
+                for i in xrange(plen):
+                    for pos, k in enumerate(xrange(i - pad, i + 1 + pad)):
+                        if k >= 0 and k < plen:
+                            C[offset, pos] = perm[k]
+                    offset += 1
+
+        S = np.concatenate([I[0:-1].reshape((I.shape[0] - 1, 1)), 
+                            I[1:].reshape((I.shape[0] - 1, 1))], axis=1)
+        return X, C, S, P
+
 
     def _transform_single_doc(self, X, row_offset, doc):
         as_indices = [self.embeddings.indices(tokens) for tokens in doc]
         for i, indices in enumerate(as_indices):
             X[row_offset + i, 0 : len(indices)] = indices
-
-
-    def inverse_transform(self, X):
-        if len(X.shape) == 1:
-            X = X.reshape((1, X.shape[0]))
-        return [[self.embeddings.index2token[x_i] for x_i in x if x_i != -1]
-                for x in X]
-
-    def window_transform(self, docs):
-        docs = self._make_docs_safe(docs)
-         
-        pad_size = self.window_size / 2
-
-        max_toks = self.max_sent_len
-        pad_sym = -1 
-
-        n_rows = np.sum([len(doc) for doc in docs])
-        X_iw = np.ones((n_rows, self.max_sent_len * self.window_size), 
-                       dtype=np.int32) * pad_sym
-
-        # Transform doc to word index sentence matrix.
-        X_is  = self.transform(docs)
-
-        row_offset = 0
-        for idx, doc in enumerate(docs):
-            doc_len = len(doc)
-            X_is_doc = X_is[row_offset : row_offset + doc_len]
-            for i in xrange(0, doc_len):
-                for pos, k in enumerate(xrange(i-pad_size, i + pad_size + 1)):
-                    if k < 0:
-                        pass
-                    elif k >= doc_len:
-                        pass
-                    else:
-                        X_iw[row_offset + i, 
-                             pos * max_toks : (pos+1) * max_toks] = X_is_doc[k]
-                    
-            row_offset += doc_len
-        return X_iw
-
-    def training_window_transform2(self, docs):
-        docs = self._make_docs_safe(docs)
-        
-        pad_size = self.window_size / 2
-        max_toks = self.max_sent_len
-        pad_sym = -1 
-
-        n_rows = np.sum([len(doc) * 2 for doc in docs])
-        X_iw = np.ones((n_rows, self.max_sent_len * self.window_size), 
-                       dtype=np.int32) * pad_sym
-        y = np.zeros((n_rows,), dtype=np.int32)
-
-        # Transform doc to word index sentence matrix and operation sentence
-        # matrix.
-        X_is = self.transform(docs)
-
-        row_offset = 0
-        input_row_offset = 0
-        for idx, doc in enumerate(docs):
-            doc_len = len(doc)
-            X_is_doc = X_is[input_row_offset : input_row_offset + doc_len]
-            for i in xrange(0, doc_len):
-                y[row_offset + i * 2] = 1
-                y[row_offset + i * 2 + 1] = 0
-
-                for pos, k in enumerate(xrange(i-pad_size, i+pad_size+1)):
-                    if k < 0:
-                        pass
-                        #X_iw[row_offset + i, pos * max_toks] = start_sym
-                    elif k >= doc_len:
-                        pass
-                        #X_iw[row_offset + i, pos * max_toks] = stop_sym
-                    else:
-                        if pos == pad_size:
-                            # selecting the focus which is j.
-                            l1 = i
-                            rand = [neg_pos for neg_pos 
-                                    in xrange(i-pad_size-1, i+pad_size+2)
-                                    if neg_pos != i and \
-                                        neg_pos >= 0 and neg_pos < doc_len]
-                            np.random.shuffle(rand)
-                            l2 = rand[0]
-                        else:
-                            # select the left or right sentences (k).
-                            l1 = k
-                            l2 = k
-                        X_iw[row_offset + i * 2, 
-                             pos * max_toks:(pos+1)*max_toks] = X_is_doc[l1]
-                        X_iw[row_offset + i * 2 + 1,
-                             pos * max_toks:(pos+1)*max_toks] = X_is_doc[l2]
-                    
-            row_offset += doc_len * 2
-            input_row_offset += doc_len
-        return X_iw, y
-
-
-
-    def training_window_transform(self, docs):
-        docs = self._make_docs_safe(docs)
-        
-        pad_size = self.window_size / 2
-        max_toks = self.max_sent_len
-        pad_sym = -1 
-
-        n_rows = np.sum([len(doc) * len(doc) for doc in docs])
-        X_iw = np.ones((n_rows, self.max_sent_len * self.window_size), 
-                       dtype=np.int32) * pad_sym
-        y = np.zeros((n_rows,), dtype=np.int32)
-
-        # Transform doc to word index sentence matrix and operation sentence
-        # matrix.
-        X_is = self.transform(docs)
-
-        row_offset = 0
-        input_row_offset = 0
-        for idx, doc in enumerate(docs):
-            doc_len = len(doc)
-            X_is_doc = X_is[input_row_offset : input_row_offset + doc_len]
-            for i in xrange(0, doc_len):
-                for j in xrange(0, doc_len):
-                    if i == j:
-                        y[row_offset + i * doc_len + j] = 1
-                    for pos, k in enumerate(xrange(i-pad_size, i+pad_size+1)):
-                        if k < 0:
-                            pass
-                            #X_iw[row_offset + i, pos * max_toks] = start_sym
-                        elif k >= doc_len:
-                            pass
-                            #X_iw[row_offset + i, pos * max_toks] = stop_sym
-                        else:
-                            if pos == pad_size:
-                                # selecting the focus which is j.
-                                l = j
-                            else:
-                                # select the left or right sentences (k).
-                                l = k
-                            X_iw[row_offset + i * doc_len + j, 
-                                 pos * max_toks:(pos+1)*max_toks] = X_is_doc[l]
-                    
-            row_offset += doc_len * doc_len
-            input_row_offset += doc_len
-        return X_iw, y
-
-    def testing_window_transform(self, dataset):
-        X_iw_gold = []
-        X_iw_perm = []
-
-        for inst in dataset:
-            x_iw_gold = [self.window_transform([inst.gold])] * inst.num_perms
-            x_iw_perms = [self.window_transform([perm]) for perm in inst.perms]
-            X_iw_gold.extend(x_iw_gold)
-            X_iw_perm.extend(x_iw_perms)
-        return X_iw_gold, X_iw_perm
-
-
-    def pprint_token_index_sequences(self, X_is, cutoff=20):
-        if len(X_is.shape) == 1:
-            X_is = X_is.reshape((1, X_is.shape[0]))
-        for row, x_is in enumerate(X_is):
-            words = []
-            budget = 0
-            for i in xrange(self.max_sent_len):
-                if x_is[i] == -1:
-                    continue
-                else:
-                    w = self.embeddings.index2token[x_is[i]]
-                    words.append(w)
-             
-            print u"{}] ".format(row) + u" ".join(words)[:cutoff]
-
-    def pprint_token_index_windows(self, X_iw, cutoff=5):
-        max_sent = X_iw.shape[1] / self.window_size
-        s_len = min(cutoff, max_sent)
-        pad = -1
-        for row, x_iw in enumerate(X_iw):
-            sents = []
-            for k in xrange(self.window_size):
-                words = []
-                for i in xrange(k * max_sent, k * max_sent + s_len):
-                    if x_iw[i] == pad:
-                        continue
-                        #words.append(u"__PAD__")
-                    else:
-                        w = self.embeddings.index2token.get(
-                            x_iw[i], u"__UNKNOWN__")
-                        words.append(w)
-                sents.append(u" ".join(words))
-            print u"{}] ".format(row) + u" ... ".join(sents)
 
 
 
