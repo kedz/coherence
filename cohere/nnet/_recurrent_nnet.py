@@ -414,7 +414,7 @@ class RecurrentNNModel(_BaseNNModel):
         trans = TokensTransformer(self.embeddings, self.window_size)
         X, C, S, P = trans.transform_test(dataset)
         M = self._mask(X)
-        return  self._test_acc(X, M, C, S, P)
+        return  float(self._test_acc(X, M, C, S, P))
 
     def fit(self, dataset):
         X, C, y, S, n_batches = self._prep_fit_data(dataset)
