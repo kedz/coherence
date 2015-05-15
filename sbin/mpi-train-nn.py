@@ -2,6 +2,7 @@ import os
 import shutil
 import argparse
 import itertools
+import numpy as np
 import pandas as pd
 from sklearn.cross_validation import KFold
 from mpi4py import MPI
@@ -175,6 +176,8 @@ def worker_process(comm, rank, model_path, corpus, clean,
                 results.update(job)
                 #print results2path(model_path, results)
                 comm.send(results, dest=0, tag=TAGS.DONE)
+
+            np.random.seed(1999)
             nnet = RecurrentNNModel(embed, alpha=job["alpha"], 
                 lam=job["lambda"], window_size=job["win_size"], 
                 fit_embeddings=job["fit_embeddings"], 
