@@ -19,14 +19,12 @@ def enum(*sequential, **named):
 # Define MPI message tags
 TAGS = enum('READY', 'DONE', 'EXIT', 'START')
 
-def import_theano(rank, corpus, clean):
+def setup_theano(rank, corpus, clean):
     worker_id = "{}.{}.{}.{}".format(
         corpus, "clean" if clean else "norm",
         MPI.Get_processor_name(), rank, corpus) 
     compile_dir=".theano.{}".format(worker_id)
     os.environ["THEANO_FLAGS"] = "base_compiledir={}".format(compile_dir)
-    import cohere.data
-    from cohere.nnet import WordEmbeddings, RecurrentNNModel
 
 def generate_jobs(max_iters, max_folds, clean):
     
@@ -113,9 +111,11 @@ def master_process(comm, n_workers, model_type, model_path, results_path,
                 comm.send(None, dest=source, tag=TAGS.EXIT)
         elif tag == TAGS.DONE:
             all_results.append(data)
-            print "Finished model {} of {}/fold {} of {} (proc-{})".format(
+            print "Finished model {} of {}/fold {} of {}".format(
                 data["model_no"], n_models, 
-                data["fold"], max_folds-1, source)
+                data["fold"], max_folds-1),
+		print "/iter {} of {} (proc-{})".format(
+			data["iter"], max_iters, source)
         elif tag == TAGS.EXIT:
             print "Process {} exited.".format(source)
             closed_workers += 1
@@ -131,7 +131,10 @@ def master_process(comm, n_workers, model_type, model_path, results_path,
     with open(results_path, "w") as f:
         df.to_csv(f, index=False)
 
-    import_theano(rank, corpus, clean)
+
+    setup_theano(rank, corpus, clean)
+    import cohere.data
+    from cohere.nnet import WordEmbeddings, RecurrentNNModel
    
     train_data = cohere.data.get_barzilay_data(
         corpus=corpus, part="train", format="tokens", clean=clean,
@@ -162,8 +165,10 @@ def worker_process(comm, rank, model_path, corpus, clean,
     # Worker processes execute code below
     status = MPI.Status() # get MPI status object
 
-    import_theano(rank, corpus, clean)
-    
+    setup_theano(rank, corpus, clean)    
+    import cohere.data
+    from cohere.nnet import WordEmbeddings, RecurrentNNModel
+
     dataset = cohere.data.get_barzilay_data(
         corpus=corpus, part="train", format="tokens", clean=clean,
         convert_brackets=True)
@@ -184,7 +189,7 @@ def worker_process(comm, rank, model_path, corpus, clean,
             dev_data = dataset[I_dev]
 
             def cb(nnet, n_iter, avg_nll):
-                train_acc = nnet.score(train_acc)
+                train_acc = nnet.score(train_data)
                 dev_acc = nnet.score(dev_data)
                 results = {"dev_acc": dev_acc, "train_nll": avg_nll, 
                            "train_acc": train_acc, "iter": n_iter}
