@@ -119,6 +119,9 @@ def master_process(comm, n_workers, model_path, results_path, corpus, clean,
     with open(results_path, "w") as f:
         df.to_csv(f, index=False)
 
+    worker_id = "{}.{}".format(MPI.Get_processor_name(), comm.rank)
+    compile_dir=".theano.{}".format(worker_id)
+    os.environ["THEANO_FLAGS"] = "base_compiledir={}".format(compile_dir)
     import cohere.data
     from cohere.nnet import WordEmbeddings, RecurrentNNModel
     
@@ -130,6 +133,7 @@ def master_process(comm, n_workers, model_path, results_path, corpus, clean,
         convert_brackets=True)
  
     embed = WordEmbeddings.li_hovy_embeddings(corpus)
+    np.random.seed(1999)
     nnet = RecurrentNNModel(embed, alpha=best_params["alpha"], 
         lam=best_params["lambda"], window_size=best_params["win_size"], 
         fit_embeddings=best_params["fit_embeddings"], 
