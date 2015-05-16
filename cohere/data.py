@@ -239,7 +239,7 @@ def get_barzilay_data(corpus=u"apws", part=u"train",
         file_ext = ".xml"
     else:
         file_ext = ".txt"
-    print path
+
     data = read_tar(
         path, text_filter=reader, file_ext=file_ext, no_perm_num=True)
     data = data[key_name]
