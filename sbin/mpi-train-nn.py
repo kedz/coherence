@@ -32,19 +32,17 @@ def generate_jobs(max_iters, max_folds, clean):
     n_jobs = len(folds) * len(alphas) * len(lambdas) * len(is_fit_embeddings) \
         * len(win_sizes) * len(batch_sizes)
 
-    jobs = itertools.product(folds, alphas, lambdas, is_fit_embeddings,
+    jobs = itertools.product(alphas, lambdas, is_fit_embeddings,
         win_sizes, batch_sizes)
     
     def job_generator(jobs):
-        job_num = 0
-        for fold, alpha, lam, fit_embeddings, win_size, batch_size in jobs:
-            if fold == 0:
-                job_num += 1
-            params = {"model_no": job_num, "fold": fold,
-                      "alpha": alpha, "lambda": lam,
-                      "fit_embeddings": fit_embeddings, "win_size": win_size,
-                      "batch_size": batch_size, "clean": clean}
-            yield params
+        for m, (alpha, lam, fit_emb, win_size, b_size) in enumerate(jobs, 1):
+            for fold in folds:
+                params = {"model_no": m, "fold": fold,
+                          "alpha": alpha, "lambda": lam,
+                          "fit_embeddings": fit_emb, "win_size": win_size,
+                          "batch_size": b_size, "clean": clean}
+                yield params    
 
     n_results = n_jobs * max_iters
 
