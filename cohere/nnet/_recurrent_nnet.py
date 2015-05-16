@@ -43,18 +43,18 @@ class RecurrentNNModel(_BaseNNModel):
         # vectors and two distinct stop vectors.
         n_recurrent_params += 2 * word_dim   #(self.window_size - 1) * word_dim
         
-        print "n_recurrent_params:", n_recurrent_params
+        #print "n_recurrent_params:", n_recurrent_params
         
         # Number of params for W1_s1, W1_s2, ... W1_s(window_size) and b1,
         # and W2 + b2
         n_feedforward_params = self.hidden_dim * word_dim * \
             self.window_size + self.hidden_dim + 1 * self.hidden_dim + 1
         
-        print "n_feedforward_params:", n_feedforward_params
+        #print "n_feedforward_params:", n_feedforward_params
         
         n_params = n_recurrent_params + n_feedforward_params
         
-        print "n_params:", n_params
+        #print "n_params:", n_params
         self.n_params = n_params
         
         # Allocate memory for all params in one block.
