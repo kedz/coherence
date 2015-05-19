@@ -114,8 +114,8 @@ def master_process(comm, n_workers, model_type, model_path, results_path,
             print "Finished model {} of {}/fold {} of {}".format(
                 data["model_no"], n_models, 
                 data["fold"], max_folds-1),
-		print "/iter {} of {} (proc-{})".format(
-			data["iter"], max_iters, source)
+            print "/iter {} of {} (proc-{})".format(
+                data["iter"], max_iters, source)
         elif tag == TAGS.EXIT:
             print "Process {} exited.".format(source)
             closed_workers += 1
@@ -131,8 +131,7 @@ def master_process(comm, n_workers, model_type, model_path, results_path,
     with open(results_path, "w") as f:
         df.to_csv(f, index=False)
 
-
-    setup_theano(rank, corpus, clean)
+    setup_theano(0, corpus, clean)
     import cohere.data
     from cohere.nnet import WordEmbeddings, RecurrentNNModel
    
