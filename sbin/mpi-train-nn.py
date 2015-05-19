@@ -19,9 +19,9 @@ def enum(*sequential, **named):
 # Define MPI message tags
 TAGS = enum('READY', 'DONE', 'EXIT', 'START')
 
-def setup_theano(rank, corpus, clean):
-    worker_id = "{}.{}.{}.{}".format(
-        corpus, "clean" if clean else "norm",
+def setup_theano(rank, corpus, model_type, clean):
+    worker_id = "{}.{}.{}.{}.{}".format(
+        model_type, corpus, "clean" if clean else "norm",
         MPI.Get_processor_name(), rank, corpus) 
     compile_dir=".theano.{}".format(worker_id)
     os.environ["THEANO_FLAGS"] = "base_compiledir={}".format(compile_dir)
@@ -131,19 +131,30 @@ def master_process(comm, n_workers, model_type, model_path, results_path,
     with open(results_path, "w") as f:
         df.to_csv(f, index=False)
 
-    setup_theano(0, corpus, clean)
+    setup_theano(0, corpus, model_type, clean)
     import cohere.data
-    from cohere.nnet import WordEmbeddings, RecurrentNNModel
+    import cohere.nnet
+    #import WordEmbeddings, RecurrentNNModel
    
     train_data = cohere.data.get_barzilay_data(
-        corpus=corpus, part="train", format="tokens", clean=clean,
+        corpus=corpus, part="train", 
+        format="trees" if model_type == "recursive" else "tokens", 
+        clean=clean,
         convert_brackets=True)
     test_data = cohere.data.get_barzilay_data(
-        corpus=corpus, part="test", format="tokens", clean=clean,
+        corpus=corpus, part="test", 
+        format="trees" if model_type == "recursive" else "tokens", 
+        clean=clean,
         convert_brackets=True)
  
-    embed = WordEmbeddings.li_hovy_embeddings(corpus)
+    embed = cohere.nnet.WordEmbeddings.li_hovy_embeddings(corpus)
     np.random.seed(1999)
+    if model_type == "recurrent":
+        model = cohere.nnet.RecurrentNNModel
+    elif model_type == "recursive":
+        model = cohere.nnet.RecursiveNNModel
+    else:
+        raise Exception("Bad model type '{}'".format(model_type))
 
     def cb(nnet, n_iter, avg_nll):
         train_acc = nnet.score(train_data)
@@ -151,7 +162,7 @@ def master_process(comm, n_workers, model_type, model_path, results_path,
         print n_iter, "avg batch nll", avg_nll
         print "train acc", train_acc, "test acc", test_acc
 
-    nnet = RecurrentNNModel(embed, alpha=best_params["alpha"], 
+    nnet = model(embed, alpha=best_params["alpha"], 
         lam=best_params["lambda"], window_size=best_params["win_size"], 
         fit_embeddings=best_params["fit_embeddings"], 
         max_iters=best_params["iter"], fit_callback=cb)
@@ -159,21 +170,23 @@ def master_process(comm, n_workers, model_type, model_path, results_path,
     nnet.fit(train_data)
     print "TEST ACC", nnet.score(test_data)
 
-def worker_process(comm, rank, model_path, corpus, clean, 
+def worker_process(comm, rank, model_type, model_path, corpus, clean, 
                    max_iters, max_folds):
     # Worker processes execute code below
     status = MPI.Status() # get MPI status object
 
-    setup_theano(rank, corpus, clean)    
+    setup_theano(rank, corpus, model_type, clean)    
     import cohere.data
-    from cohere.nnet import WordEmbeddings, RecurrentNNModel
+    import cohere.nnet 
 
     dataset = cohere.data.get_barzilay_data(
-        corpus=corpus, part="train", format="tokens", clean=clean,
+        corpus=corpus, part="train", 
+        format="trees" if model_type == "recursive" else "tokens", 
+        clean=clean,
         convert_brackets=True)
     
     n_data = len(dataset)
-    embed = WordEmbeddings.li_hovy_embeddings(corpus)
+    embed = cohere.nnet.WordEmbeddings.li_hovy_embeddings(corpus)
      
     while True:
         comm.send(None, dest=0, tag=TAGS.READY)
@@ -196,7 +209,14 @@ def worker_process(comm, rank, model_path, corpus, clean,
                 comm.send(results, dest=0, tag=TAGS.DONE)
 
             np.random.seed(1999)
-            nnet = RecurrentNNModel(embed, alpha=job["alpha"], 
+            if model_type == "recurrent":
+                model = cohere.nnet.RecurrentNNModel
+            elif model_type == "recursive":
+                model = cohere.nnet.RecursiveNNModel
+            else:
+                raise Exception("Bad model type '{}'".format(model_type))
+
+            nnet = model(embed, alpha=job["alpha"], 
                 lam=job["lambda"], window_size=job["win_size"], 
                 fit_embeddings=job["fit_embeddings"], 
                 fit_callback=cb, max_iters=max_iters)
@@ -236,8 +256,8 @@ def main(model_path, results_path, model_type, corpus, clean,
         master_process(comm, n_workers, model_type, 
             model_path, results_path, corpus, clean, max_iters, max_folds)
     else:
-        worker_process(
-            comm, rank, model_path, corpus, clean, max_iters, max_folds)
+        worker_process(comm, rank, model_type,
+            model_path, corpus, clean, max_iters, max_folds)
 
 if __name__ == u"__main__":
     parser = argparse.ArgumentParser()
