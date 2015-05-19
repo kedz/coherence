@@ -220,7 +220,7 @@ def get_barzilay_data(corpus=u"apws", part=u"train",
     def read_parse(f):
         doc = []
         for line in f:
-            t = Tree.fromstring(line.strip().decode(u"utf-8"))
+            t = Tree.fromstring(line.strip().decode(u"utf-8").lower())
             if convert_brackets is True:
                 for pos in t.treepositions("leaves"):
                     t[pos] = __brackets.get(t[pos], t[pos])
