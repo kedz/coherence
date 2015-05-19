@@ -1,39 +1,12 @@
 import theano
 import theano.tensor as T
 import numpy as np
-#import cPickle as pickle
-#import os
-#import datetime
 from cohere.nnet._base import _BaseNNModel
+from cohere.nnet._transformers import TreeTransformer
 from itertools import izip
 
 
-
 class RecursiveNNModel(_BaseNNModel):
-    def __init__(self, embeddings, max_sent_len=150, max_ops_len=40, 
-                 window_size=3, hidden_dim=100, alpha=.01, lam=1.25,
-                 batch_size=25, max_iters=10, 
-                 fit_embeddings=False, fit_callback=None, 
-                 update_method="adagrad", initializers=None):
-         
-        self.max_ops_len = max_ops_len
-
-        self.sym_vars = {u"X_iw": T.imatrix(name=u"X_iw"),
-                         u"y": T.ivector(name=u"y"),
-                         u"O_iw": T.tensor3(name=u"O_iw", dtype="int32")}
-
-        super(RecursiveNNModel, self).__init__(
-            embeddings, max_sent_len=max_sent_len, hidden_dim=hidden_dim,
-            window_size=window_size, alpha=alpha, lam=lam,
-            batch_size=batch_size, fit_embeddings=fit_embeddings, 
-            fit_callback=fit_callback, update_method=update_method,
-            initializers=initializers, max_iters=max_iters)
-       
-
-        #if embeddings is not None:
-        #    self.init_params(self.embeddings, initializers)
-        #    self.build_network(
-        #        self.max_sent_len, self.max_ops_len, self.window_size)
 
     def _init_params(self):
         
@@ -57,20 +30,20 @@ class RecursiveNNModel(_BaseNNModel):
             word_dim
        
         # Number of params for pads.
-        n_recurrent_params += self.window_size / 2 * word_dim * 2
+        n_recurrent_params += word_dim * 2
         
-        print "n_recurrent_params:", n_recurrent_params
+        #print "n_recurrent_params:", n_recurrent_params
         
         # Number of params for W1_s1, W1_s2, ... W1_s(window_size) and b1,
         # and W2 + b2
         n_feedforward_params = self.hidden_dim * word_dim * \
             self.window_size + self.hidden_dim + 1 * self.hidden_dim + 1
         
-        print "n_feedforward_params:", n_feedforward_params
+        #print "n_feedforward_params:", n_feedforward_params
         
         n_params = n_recurrent_params + n_feedforward_params
         
-        print "n_params:", n_params
+        #print "n_params:", n_params
         self.n_params = n_params
         
         # Allocate memory for all params in one block.
@@ -143,26 +116,27 @@ class RecursiveNNModel(_BaseNNModel):
         
         eps = np.sqrt(6. / (self.hidden_dim + word_dim * self.window_size))
 
-        # Init W1_s...
-        for i in xrange(self.window_size):
-            name = "W1_s{}".format(i)
-            next_pointer = current_pointer + self.hidden_dim * word_dim
-            W1_s = self.theta[current_pointer:next_pointer].reshape(
-                (word_dim, self.hidden_dim))
-            W1_s.name = name
-            self.params[W1_s.name] = W1_s
-            self._reg_params.append(W1_s) 
-           
-            if initializers.get(name, None) is None:
-                W1_s_init = np.random.uniform(
-                    low=-eps, high=eps, 
-                    size=(word_dim, self.hidden_dim)).astype(
-                        theano.config.floatX)
-            else:
-                W1_s_init = initializers.get(name)
-            inits.append(W1_s_init)
-            current_pointer = next_pointer
+        # Init W1...
+        name = "W1"
+        next_pointer = current_pointer + \
+            self.hidden_dim * word_dim * self.window_size
         
+        W1 = self.theta[current_pointer:next_pointer].reshape(
+                (word_dim * self.window_size, self.hidden_dim))
+        W1.name = name
+        self.params[W1.name] = W1
+        self._reg_params.append(W1)
+            
+        if initializers.get(name, None) is None:
+            W1_init = np.random.uniform(
+                low=-eps, high=eps, 
+                size=(word_dim * self.window_size, self.hidden_dim)).astype(
+                    theano.config.floatX)
+        else:
+            W1_init = initializers.get(name)
+        inits.append(W1_init)
+        current_pointer = next_pointer
+
         # Init b1 (hidden_dim)
         next_pointer = current_pointer + self.hidden_dim    
         b1 = self.theta[current_pointer:next_pointer].reshape(
@@ -210,9 +184,9 @@ class RecursiveNNModel(_BaseNNModel):
         current_pointer = next_pointer
 
         # W_start (window_size / 2, word_dim)
-        next_pointer = current_pointer + self.window_size / 2 * word_dim    
+        next_pointer = current_pointer + word_dim    
         W_start = self.theta[current_pointer:next_pointer].reshape(
-                (self.window_size / 2, word_dim))
+                (1, word_dim))
         W_start.name = "W_start"
         self.params[W_start.name] = W_start
             
@@ -225,9 +199,9 @@ class RecursiveNNModel(_BaseNNModel):
         current_pointer = next_pointer
 
         # W_stop (window_size / 2, word_dim)
-        next_pointer = current_pointer + self.window_size / 2 * word_dim    
+        next_pointer = current_pointer +  word_dim    
         W_stop = self.theta[current_pointer:next_pointer].reshape(
-                (self.window_size / 2, word_dim))
+                (1, word_dim))
         W_stop.name = "W_stop"
         self.params[W_stop.name] = W_stop
             
@@ -265,193 +239,105 @@ class RecursiveNNModel(_BaseNNModel):
                 name="grad_hist",
                 borrow=True)
 
-    def _build_network(self):
-        max_sent_len = self.max_sent_len
-        max_ops_len = self.max_ops_len
-        win_size = self.window_size
-        
-        # _funcs will contains compiled theano functions of several
-        # variables for debugging purposes
-        self._funcs = {}
-        
-        # _hidden_layers will contain theano symbolic variables of 
-        # h_s1, ... , h_sn and h1.
-        self._hidden_layers = {}
-        
-        X_iw = self.sym_vars[u"X_iw"]
-        E = self.params[u"E"]    
-        O_iw = self.sym_vars[u"O_iw"]
-        y = self.sym_vars[u"y"]
-                
-        H_s = self._build_sentence_layer(
-            X_iw, O_iw, y, E, max_sent_len, max_ops_len, win_size)
+    def _init_network(self):
 
-        self._funcs["H_s"] = theano.function([X_iw, O_iw], H_s)
-        for i in xrange(win_size):
-            self._hidden_layers["h_s{}".format(i)] = H_s[i]
-
-        # Compute the first hidden layer (this is the concatenation of all
-        # hidden sentence vectors).
-        a1 = 0
-        for i in xrange(win_size):
-            W1_si = self.params["W1_s{}".format(i)]
-            a1 += T.dot(H_s[i], W1_si)
-        h1 = T.tanh(a1 + self.params["b1"])
-        self._hidden_layers["h1"] = h1
-        self._funcs["h1"] = theano.function([X_iw, O_iw], h1)
-
-        a2 = T.dot(h1, self.params["W2"]) + self.params["b2"]
+        self._sym_vars = {} 
+        # X is a matrix of sentences used in the current batch.
+        # X.shape = (n_sents, max_sent_len)
+        X = T.imatrix(name="X")
+        self._sym_vars[u"X"] = X
         
-        prob_coherent = 1 / (1 + T.exp(-a2))
+        # O is the associated op sequence for each sentence in the current 
+        # batch. Each instruction contains 6 integers.
+        # O.shape = (n_sents, max_ops_len, 6)
+        O = T.tensor3(name="O", dtype="int32")
+        self._sym_vars[u"O"] = O
+        
+        # C is a matrix of cliques, with values indicating which sentences
+        # are in each clique.
+        # C.shape = (n_cliques, window_size)
+        C = T.imatrix(name="C")
+        self._sym_vars[u"C"] = C
+
+        # y is a vector of clique labels: 1 = coherent, 0 incoherent.
+        # y.shape = (n_cliques,)
+        y = T.ivector(name="y")
+        self._sym_vars[u"y"] = y
+
+        # S is a matrix of slices for use during test time.
+        # E.g. C[S[i,0] : S[i,1]] contains all cliques in the ith document.
+        S = T.imatrix("S")
+
+        # P is a matrix of pairs of document indices corresponding to 
+        # evaluation comparisons.
+        # E.g. P[i] corresponds to the index of the ith comparison
+        # where P[i,0] is the index of the gold document, and P[i,1] 
+        # a permuted document we are comparing it to.
+        P = T.imatrix("P")
+
+        # E is a matrix of word embeddings.
+        # E.shape = (vocab_size, embedding_dim)
+        E = self.params["E"]
+        
+        n_cliques = C.shape[0]   # The number of cliques (aka batch size).
+        n_sents = X.shape[0]
+        clique_size = C.shape[1] # The window size of the cliques.
+        embed_dim = E.shape[1]   # The word embedding dimensionality.
+        all_clique_size = T.scalar(dtype="int32")
+        self._sym_vars["all_clique_size"] = all_clique_size
+        
+        X_emb = E[X] 
+        X_emb = X_emb.dimshuffle(1,0,2)
+
+        O_T = O.dimshuffle(1,0,2).reshape(
+            (O.shape[1], O.shape[0], 6))
+    
+        B = T.zeros_like(X_emb)
+        B = T.set_subtensor(B[0,:], X_emb[0,:])
+        indices = T.arange(X_emb.shape[1], dtype="int32")
+        
+        H_s, _ = theano.scan(
+                fn=self.tree_step,
+                sequences=O_T,
+                non_sequences=[X_emb, indices, n_sents], 
+                outputs_info=B)
+        H_s = H_s[-1][0]
+        H1 = H_s[C].reshape((n_cliques, clique_size * embed_dim))
+
+        center = self.window_size / 2
+        for k in xrange(self.window_size):
+            if k < center:
+                block = self.params["W_start"]
+            elif k > center:
+                block = self.params["W_stop"]
+            else:
+                continue
+
+            H1 = T.set_subtensor(
+                H1[:,k * embed_dim:(k+1)*embed_dim], 
+                T.switch(T.eq(C[:,k], -1).reshape((n_cliques, 1)),
+                         T.alloc(block, n_cliques, embed_dim),
+                         H1[:,k * embed_dim:(k+1)*embed_dim]))
+        
+        H2 = T.tanh(T.dot(H1, self.params["W1"]) + self.params["b1"]) 
+        prob_coherent = T.nnet.sigmoid(
+            T.dot(H2, self.params["W2"]) + self.params["b2"])
         prob_incoherent = 1 - prob_coherent
 
-        self._nn_output = T.concatenate(
-            [prob_incoherent, prob_coherent], axis=1)
-        self._funcs["P(y=1|w)"] = theano.function(
-            [X_iw, O_iw], prob_coherent)
-        self._funcs["P(y=0|w)"] = theano.function(
-            [X_iw, O_iw], prob_incoherent)
-        self._funcs["P(Y|w)"] = theano.function(
-            [X_iw, O_iw], self._nn_output)
-        
-        self._nn_output_func = theano.function([X_iw, O_iw], self._nn_output)
+        # Training cost, nll, and regularization vars setup here.  
+        nn_output = T.concatenate([prob_incoherent, prob_coherent], axis=1)
+        nll = -T.mean(
+            T.log(nn_output)[T.arange(y.shape[0]), y])
 
-        self._nll = -T.mean(
-            T.log(self._nn_output)[T.arange(y.shape[0]), y])      
-        
-        y_pred = T.argmax(self._nn_output, axis=1)
-        self._funcs["avg win error"] = theano.function(
-            [X_iw, O_iw, y], T.mean(T.neq(y, y_pred)))
-
-    def _build_sentence_layer(self, X_iw, O_iw, y, E, max_sent_len, 
-                              max_ops_len, win_size):
- 
-        # Index into word embedding matrix and construct a 
-        # 3d tensor for input. After dimshuffle, dimensions should
-        # be (MAX_LEN * window_size, batch_size, word_dim).
-        X = E[X_iw] 
-        X = X.dimshuffle(1,0,2)
-        self._funcs["X"] = theano.function([X_iw], X)  
-        B = []
-        cntr_idx = self.window_size / 2
-        for i in xrange(self.window_size):
-            
-            B_s = T.zeros_like(X[:max_sent_len])
-
-            if i < cntr_idx:
-                print "left", i
-                B_s_slice = T.switch(
-                    T.eq(X_iw[:, i * max_sent_len], -1).reshape(
-                        (X.shape[1] ,1)),
-                    T.alloc(self.params["W_start"][i],X.shape[1]),
-                    X[i * max_sent_len,:])
-                B_s = T.set_subtensor(
-                    B_s[:,:],
-                    B_s_slice)
-
-            elif i > cntr_idx:
-                k = i - cntr_idx - 1
-                print "right", k
-                B_s_slice = T.switch(
-                    T.eq(X_iw[:, i * max_sent_len], -1).reshape(
-                        (X.shape[1] ,1)),
-                    T.alloc(self.params["W_stop"][k],X.shape[1]),
-                    X[i * max_sent_len,:])
-                B_s = T.set_subtensor(
-                    B_s[:,:],
-                    B_s_slice)
-
-            else:
-                B_s = T.set_subtensor(B_s[0,:], X[i * max_sent_len,:])
-            B.append(B_s)
-
-        self._funcs["B"] = theano.function([X_iw], B)
-        O = O_iw.dimshuffle(1,0,2).reshape(
-            (O_iw.shape[1], O_iw.shape[0], 6))
-        self._funcs["O"] = theano.function([O_iw], O)
-        
-        indices = T.arange(X.shape[1], dtype="int32")
-        H_s = [] 
-        for i in xrange(win_size):
-            results, _ = theano.scan(
-                fn=self.tree_step,
-                sequences=[
-                    {"input": O,   "taps":[i * max_ops_len]},], 
-                non_sequences=[X[i *max_sent_len:(i+1)*max_sent_len],
-                               indices, indices.shape[0]],
-                outputs_info=B[i],
-                n_steps=max_ops_len)
-            h_si = results[-1][0]
-            H_s.append(h_si)
-            self._hidden_layers["h_s{}".format(i)] = h_si
-            self._funcs["h_s{}".format(i)] = theano.function(
-                [X_iw, O_iw], h_si, on_unused_input='ignore') 
-            
-        return H_s
-
-    def tree_step(self, O_t, B, X_s, index, batch_size):
-
-        # op code (1 means simply propagate previous result)
-        # (0 means compute hiden layer for left and right args).
-        o_code = O_t[:,0].reshape((batch_size, 1))
-        # Location in buffer to place result of computation.
-        o_idx = O_t[:,1]
-        # Left source (1 is word embeddings, 0 is buffer B)
-        o_src_l = O_t[:,2].reshape((batch_size, 1))
-        # Left index (grab the vector at this index from left source).
-        i_l = O_t[:,3]
-        # Right source (1 is word embeddings, 0 is buffer B)
-        o_src_r = O_t[:,4].reshape((batch_size, 1))
-        # Right index (grab the vector at this index from right source).
-        i_r = O_t[:,5]
-
-        left = T.switch(T.eq(o_src_l, 1), 
-            (X_s[i_l, index]), (B[i_l, index]))
-        left_dot = T.dot(left, self.params["W_rec_l"])
-
-        right = T.switch(T.eq(o_src_r, 1),
-            (X_s[i_r, index]), (B[i_r, index]))
-        right_dot = T.dot(right, self.params["W_rec_r"])
-
-        h = T.tanh(left_dot + right_dot + self.params["b_rec"])
-        
-        result = T.switch(T.eq(o_code, 1), B[0], h)
-        B_tp1 = T.set_subtensor(B[o_idx, index], result)
-
-        return B_tp1, theano.scan_module.until(T.all(T.eq(o_code, 1)))
-
-    def log_prob_coherent(self, X_iw, O_iw):
-        P = self._funcs["P(y=1|w)"](X_iw, O_iw)
-        return np.sum(np.log(P))
-
-    def fit(self, X_iw, O_iw, y):
-
-        n_batches = X_iw.shape[0] / self.batch_size 
-        if X_iw.shape[0] % self.batch_size != 0:
-            n_batches += 1
-
-        X_iw_shared = theano.shared(X_iw.astype(np.int32),
-            name="X_iw_shared",
-            borrow=True)
-        O_iw_shared = theano.shared(O_iw.astype(np.int32),
-            name="O_iw_shared",
-            borrow=True)
-        y_shared = theano.shared(y.astype(np.int32),
-            name="y_shared",
-            borrow=True)
- 
-
-        X_iw_sym = self.sym_vars["X_iw"]
-        O_iw_sym = self.sym_vars["O_iw"]
-        y_sym = self.sym_vars["y"]
-        
         reg = 0
         for param in self._reg_params:
-            reg += (param**2).sum() 
+            reg += (param**2).sum()
 
-        reg = reg * self.lam * self.window_size / float(X_iw.shape[0])
-        cost = self._nll + reg  
-        gtheta = T.grad(cost, self.theta)
+        reg *= self.lam * self.window_size / all_clique_size
+        cost = nll + reg
+        self._training_outputs = [cost, nll, reg]
+
+        gtheta = T.grad(cost, wrt=self.theta)
 
         if self.update_method == "adagrad":
             # diagonal adagrad update
@@ -460,65 +346,122 @@ class RecursiveNNModel(_BaseNNModel):
                 T.eq(grad_hist_update, 0), 1, grad_hist_update)
             theta_update = self.theta - \
                     self.alpha / T.sqrt(grad_hist_upd_safe) * gtheta
-            updates = [(self.grad_hist, grad_hist_update),
-                       (self.theta, theta_update)]
+            self._updates = [(self.grad_hist, grad_hist_update),
+                             (self.theta, theta_update)]
 
         elif self.update_method == "sgd":
-            updates = [(self.theta, self.theta - self.alpha * gtheta)]
+            self._updates = [(self.theta, self.theta - self.alpha * gtheta)]
         else:
             raise Exception("'{}' is not an implemented update method".format(
                 self.update_method))
-        
-        index = T.scalar(dtype='int32')  # index to a [mini]batch
-        train_model = theano.function(
-            inputs=[index],
-            outputs=[cost, self._nll, reg],
-            updates=updates,
-            givens={
-                X_iw_sym: X_iw_shared[
-                    index * self.batch_size : (index + 1) * self.batch_size],
-                y_sym: y_shared[
-                    index * self.batch_size : (index + 1) * self.batch_size],
-                O_iw_sym: O_iw_shared[
-                    index * self.batch_size : (index + 1) * self.batch_size],
-            }
-        )
+
+        # Testing outputs setup here.
+
+        log_O = T.log(prob_coherent)
+
+        # This is cause a segfault for some reason?
+#        doc_lps, _ = theano.scan(
+#                fn=lambda s: T.sum(log_O[s[0]:s[1]]),
+#                sequences=S)
+#        pairwise_scores = doc_lps[P]
+#        n_correct = T.sum(pairwise_scores[:,0] > pairwise_scores[:,1])
+#        accuracy = n_correct * 1. / P.shape[0]
+#        self._test_acc = theano.function([X, O, C, S, P],
+#            accuracy)
+        self._test_log_prob = theano.function([X, O, C],
+            log_O)
+
+    def tree_step(self, O_t, B_tm1, X, indices, n_sents):
+        # op code (1 means simply propagate previous result)
+        # (0 means compute hiden layer for left and right args).
+        o_code = O_t[:,0]
+        # Location in buffer to place result of computation.
+        o_idx = O_t[:,1]
+        # Left source (1 is word embeddings, 0 is buffer B)
+        o_src_l = O_t[:,2]
+        # Left index (grab the vector at this index from left source).
+        i_l = O_t[:,3]
+        # Right source (1 is word embeddings, 0 is buffer B)
+        o_src_r = O_t[:,4]
+        # Right index (grab the vector at this index from right source).
+        i_r = O_t[:,5]
         
 
+        Op_left = T.eq(o_src_l, 1).reshape((n_sents, 1))
+        X_left = X[i_l, indices]
+        B_tm1_left = B_tm1[i_l, indices]
+        left = T.switch(Op_left, X_left, B_tm1_left) 
+        left_dot = T.dot(left, self.params["W_rec_l"])
+
+        Op_right = T.eq(o_src_r, 1).reshape((n_sents, 1))
+        X_right = X[i_r, indices]
+        B_tm1_right = B_tm1[i_r, indices]
+        right = T.switch(Op_right, X_right, B_tm1_right)
+        right_dot = T.dot(right, self.params["W_rec_r"])
+
+        h = T.tanh(left_dot + right_dot + self.params["b_rec"])
+        
+        result = T.switch(
+            T.eq(o_code, 1).reshape((n_sents, 1)), 
+            B_tm1[0], 
+            h)
+
+        B_t = T.set_subtensor(B_tm1[o_idx, indices], result)
+
+        #result = T.switch(T.eq(o_code, 1), B[0], h)
+        #B_tp1 = T.set_subtensor(B[o_idx, index], result)
+        #B_t = T.set_subtensor(B_tm1[T.zeros_like(index), index], B_tm1[0])
+        #B_t = T.set_subtensor(B_tm1[T.zeros_like(indices), indices], result)
+        return B_t
+
+    def score(self, dataset):
+        trans = TreeTransformer(self.embeddings, self.window_size)
+        X, O, C, S, P = trans.transform_test(dataset)
+        lp = self._test_log_prob(X, O, C) 
+        doc_lps = np.array([np.sum(lp[s[0]:s[1]]) for s in S])
+        pairwise_scores = doc_lps[P]
+        n_correct = np.sum(pairwise_scores[:,0] > pairwise_scores[:,1])
+        accuracy = n_correct * 1. / P.shape[0]
+
+        return accuracy
+
+    def fit(self, dataset):
+        trans = TreeTransformer(
+            self.embeddings, self.batch_size, self.window_size)
+        X, O, C, y, S, n_batches= trans.transform_gold(dataset)
+        X_sh = theano.shared(X, name="X_shared", borrow=True)
+        O_sh = theano.shared(O, name="O_shared", borrow=True)
+        C_sh = theano.shared(C, name="C_shared", borrow=True)
+        y_sh = theano.shared(y, name="y_shared", borrow=True)
+
+        b_size = self.batch_size
+        idx = T.scalar(dtype='int32')  # index to a [mini]batch
+        S_var = T.ivector()
+        train_model = theano.function(
+            inputs=[idx, S_var, self._sym_vars["all_clique_size"]],
+            outputs=self._training_outputs,
+            updates=self._updates,
+            givens={
+                self._sym_vars["X"]: X_sh[S_var],
+                self._sym_vars["O"]: O_sh[S_var],
+                self._sym_vars["C"]: C_sh[idx * b_size : (idx + 1) * b_size],
+                self._sym_vars["y"]: y_sh[idx * b_size : (idx + 1) * b_size], 
+            }
+        )
+
+        all_clique_size = C.shape[0]
         batch_nll = np.zeros((n_batches,))
         for n_iter in xrange(1, self.max_iters + 1):
+           
             for i in xrange(n_batches):
-                cost, nll, reg = train_model(i)
-                batch_nll[i] = nll
+                cost, nll, reg = train_model(i, S[i], all_clique_size)
+                batch_nll[i] = nll   
             if self.fit_callback is not None:
-                self.fit_callback(self, n_iter)
+                self.fit_callback(self, n_iter, np.mean(batch_nll))
+
             else:
                 print n_iter, "avg batch nll", np.mean(batch_nll)
 
-    def score(self, X_gold, O_gold, X_perm, O_perm):
-        correct = 0
-        total = 0
-        for X_iw_gold, O_iw_gold, X_iw_perm, O_iw_perm in izip(
-                X_gold, O_gold, X_perm, O_perm):
-            gold_lp = self.log_prob_coherent(X_iw_gold, O_iw_gold)
-            perm_lp = self.log_prob_coherent(X_iw_perm, O_iw_perm)
-            if gold_lp > perm_lp:
-                correct += 1
-            total += 1
-        return float(correct) / max(total, 1)
-
-
-    def dbg_print_window(self, X_iw):
-        print X_iw.shape[1] / 3
-        print self.max_sent_len
-        for x_iw in X_iw:
-            for k in xrange(self.window_size):
-                #if x_iw[k * self.max_sent_len] == -1:
-                #    continue
-                print k,
-                for xi in x_iw[k*self.max_sent_len:(k+1)*self.max_sent_len]:
-                    if xi == -1:
-                        continue
-                    print self.embeddings.index2token[xi],
-                print 
-            print 
+    def ready(self):
+        self._init_params()
+        self._init_network()

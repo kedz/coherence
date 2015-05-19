@@ -15,9 +15,6 @@ class TokensTransformer(BaseEstimator):
                 max_sent = max(max_sent, len(sent))
         return max_sent
 
-
-
-
     @classmethod
     def _make_docs_safe(self, docs):
         assert isinstance(docs, list) or isinstance(docs, tuple)
@@ -117,9 +114,212 @@ class TokensTransformer(BaseEstimator):
         for i, indices in enumerate(as_indices):
             X[row_offset + i, 0 : len(indices)] = indices
 
-
-
 class TreeTransformer(object):
+    def __init__(self, embeddings, batch_size=25, window_size=3):
+        self.embeddings = embeddings
+        self.batch_size = batch_size
+        self.window_size = window_size
+
+    def _get_max_sent_and_ops(self, dataset):
+        max_sent = 0
+        max_op = 0    
+        for doc in dataset.gold:
+            max_sent = max(max_sent, max([len(tree.leaves()) for tree in doc]))
+            op_lens = [len(self._get_command_sequence(tree)) for tree in doc]
+            max_op = max(max_op, max(op_lens))
+        return max_sent, max_op
+
+    def transform_gold(self, dataset):
+        if not isinstance(dataset, CoherenceData):
+            raise Exception(u"Argument dataset must be a CoherenceData object")
+        if not dataset.format == u"trees":
+            raise Exception(u"Argument dataset must be of format 'trees'.")
+        
+        max_sent, max_ops = self._get_max_sent_and_ops(dataset)
+
+        I = np.cumsum(
+            np.array(
+                [0] + [len(doc) for doc in dataset.gold],
+                dtype=u"int32"))
+        n_sents = I[-1]
+        X = -1 * np.ones((n_sents, max_sent), dtype="int32")       
+        O = np.zeros((n_sents, max_ops, 6), dtype="int32")
+        O[:,:,0] = 1
+        
+        for i, doc in enumerate(dataset.gold):
+            self._transform_single_doc(X, O, I[i], doc)
+
+        C, y, S, n_batches = self._transform_training_cliques(I)
+
+        return X, O, C, y, S, n_batches
+
+    def _transform_single_doc(self, X, O, row_offset, doc):
+        
+        as_tokens = [[word.lower() for word in tree.leaves()]
+                     for tree in doc]
+
+        as_indices = [self.embeddings.indices(tokens) for tokens in as_tokens]
+        as_ops = [self._get_command_sequence(tree) for tree in doc]
+
+        for i, indices in enumerate(as_indices):
+            n_ops = len(as_ops[i])
+            X[row_offset + i, 0 : len(indices)] = indices
+            if len(as_ops[i]) > 0:
+                O[row_offset + i, 0 : n_ops, :] = as_ops[i]
+
+    def _transform_training_cliques(self, I):
+        n_docs = I.shape[0] - 1
+        n_cliques = np.sum((I[d + 1] - I[d])**2 for d in xrange(n_docs))
+        C = np.ones((n_cliques, self.window_size), dtype="int32")
+        y = np.ones((n_cliques,), dtype="int32")
+        
+        win_pad = self.window_size / 2
+        center = win_pad
+
+        offset = 0
+        for d in xrange(n_docs):
+            doc_size = I[d + 1] - I[d]
+            for i in xrange(doc_size):
+                for j in xrange(doc_size):
+                    for pos, k in enumerate(
+                            xrange(i - win_pad, i + win_pad + 1)):
+                        if k < 0 or k >= doc_size:
+                            C[offset,pos] = -1
+                        elif pos == center:
+                            C[offset,pos] = I[d] + j
+                            y[offset] = 1 if i == j else 0
+                        else:
+                            C[offset,pos] = I[d] + k
+                    offset += 1
+
+        n_batches = C.shape[0] / self.batch_size
+        n_batches += 1 if C.shape[0] % self.batch_size != 0 else 0
+        S = []
+
+        for b in xrange(n_batches):
+            B = C[b * self.batch_size : (b + 1) * self.batch_size]
+            s, B_inv = np.unique(B, return_inverse=True)
+            if s[0] == -1:
+                s = s[1:]
+                B_inv -= 1
+            B_inv = B_inv.reshape(B.shape)
+            S.append(s)
+            C[b * self.batch_size : (b + 1) * self.batch_size] = B_inv
+        return C, y, S, n_batches
+
+
+
+    def _get_command_sequence(self, tree, commands=None):
+        # Initial case, convert tree to binary, and start recursion.
+        if commands is None:
+            commands = []
+            tree = tree.copy(deep=True)
+            tree.chomsky_normal_form(factor="left")
+            word_position = 0
+            for position in tree.treepositions():
+                if not isinstance(tree[position], Tree):
+                    tree[position] = word_position
+                    word_position += 1
+            cmds = []
+            self._get_command_sequence(tree, commands=cmds)
+            return cmds
+
+        # Recursive case, with 3 cases:
+        else:
+            # Base case, this is a preterminal node, return 
+            # child.
+            if isinstance(tree, Tree) and not isinstance(tree[0], Tree):
+                return (1, tree[0])
+            # Recursive case with two children, add a command sequence.
+            elif len(tree) == 2:
+                left_source, left_position = self._get_command_sequence(
+                    tree[0], commands=commands)
+                right_source, right_position = self._get_command_sequence(
+                    tree[1], commands=commands)
+                commands.append([0, min(left_position, right_position),
+                                 left_source, left_position,
+                                 right_source, right_position])
+                return [0, min(left_position, right_position)]
+            # Recursive case with one child, propagate child up the tree.
+            else:
+                return self._get_command_sequence(tree[0], commands=commands)
+
+    def transform_test(self, dataset):
+        if not isinstance(dataset, CoherenceData):
+            raise Exception(u"Argument dataset must be a CoherenceData object")
+        if not dataset.format == u"trees":
+            raise Exception(u"Argument dataset must be of format 'trees'.")
+
+        max_sent, max_ops = self._get_max_sent_and_ops(dataset)
+        
+        leaves2index = {}
+        trees = []
+        P = []
+        I = [0]
+        offset = 0
+        tree_offset = 0
+        for inst in dataset:
+            gold_off = offset
+            offset += 1
+            I.append(len(inst.gold))
+            for tree in inst.gold:
+                as_tuple = tuple(tree.leaves())
+                if as_tuple not in leaves2index:
+                    leaves2index[as_tuple] = tree_offset
+                    tree_offset += 1
+                    trees.append(tree)
+           
+            for perm in inst.perms:
+                P.append([gold_off, offset])
+                I.append(len(perm))
+                offset += 1
+                for tree in perm:
+                    as_tuple = tuple(tree.leaves())
+                    if as_tuple not in leaves2index:
+                        leaves2index[as_tuple] = tree_offset
+                        tree_offset += 1
+                        trees.append(tree)
+        
+        n_trees = len(trees)
+        X = np.ones((n_trees, max_sent), dtype="int32") * -1
+        O = np.zeros((n_trees, max_ops, 6), dtype="int32")
+        O[:,:,0] = 1
+
+        self._transform_single_doc(X, O, 0, trees)
+        I = np.cumsum(np.array(I), dtype="int32")
+        P = np.array(P, dtype="int32") 
+
+        C = np.ones((I[-1], self.window_size), dtype="int32") * -1
+
+        offset = 0
+        pad = self.window_size / 2
+        for inst in dataset:
+            gold = [leaves2index[tuple(tree.leaves())] for tree in inst.gold]
+            dlen = len(gold)
+            for i in xrange(dlen): 
+                for pos, k in enumerate(xrange(i - pad, i + 1 + pad)):
+                    if k >= 0 and k < dlen:
+                        C[offset, pos] = gold[k]
+                offset += 1
+            for perm_doc in inst.perms:
+                perm = [leaves2index[tuple(tree.leaves())] 
+                        for tree in perm_doc]
+                plen = len(perm)
+                for i in xrange(plen):
+                    for pos, k in enumerate(xrange(i - pad, i + 1 + pad)):
+                        if k >= 0 and k < plen:
+                            C[offset, pos] = perm[k]
+                    offset += 1
+
+        S = np.concatenate([I[0:-1].reshape((I.shape[0] - 1, 1)), 
+                            I[1:].reshape((I.shape[0] - 1, 1))], axis=1)
+        return X, O, C, S, P
+
+
+
+
+
+class TreeTransformer2(object):
     def __init__(self, embeddings, window_size=3, max_sent_len=120, 
                  max_ops_len=15):
         self.embeddings = embeddings
